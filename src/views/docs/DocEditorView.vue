@@ -1,0 +1,487 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { MdEditor } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
+import {
+  addDocumentToKnowledgeBase,
+  deleteDocument,
+  getDocumentById,
+  updateDocument,
+} from '../../api/documents'
+import { getMyKnowledgeBases } from '../../api/knowledge'
+import AIAssistantPanel from '../../components/document/AIAssistantPanel.vue'
+import { clearDocumentDraft, readDocumentDraft, writeDocumentDraft } from '../../utils/documentDraft'
+import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
+import { track } from '../../utils/tracker'
+import type { KnowledgeBaseListItem } from '../../types/knowledge'
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+
+const route = useRoute()
+const router = useRouter()
+const docId = computed(() => String(route.params.id || ''))
+
+const pageLoading = ref(false)
+const deleting = ref(false)
+const pageError = ref('')
+const saveStatus = ref<SaveStatus>('idle')
+const saveErrorMessage = ref('')
+const isLoaded = ref(false)
+const localDraftRestored = ref(false)
+const joinDialogVisible = ref(false)
+const joining = ref(false)
+const knowledgeLoading = ref(false)
+const knowledgeBases = ref<KnowledgeBaseListItem[]>([])
+const selectedKnowledgeBaseId = ref('')
+
+const form = reactive({
+  title: '',
+  content: '',
+})
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+function maybeRestoreLocalDraft(serverTitle: string, serverContent: string): boolean {
+  const draft = readDocumentDraft(docId.value)
+
+  if (!draft) {
+    return false
+  }
+
+  const hasDiff = draft.title !== serverTitle || draft.content !== serverContent
+
+  if (!hasDiff) {
+    clearDocumentDraft(docId.value)
+    return false
+  }
+
+  form.title = draft.title
+  form.content = draft.content
+  return true
+}
+
+const saveStatusText = computed(() => {
+  if (saveStatus.value === 'saving') {
+    return '保存中...'
+  }
+
+  if (saveStatus.value === 'saved') {
+    return '已保存'
+  }
+
+  if (saveStatus.value === 'error') {
+    return '保存失败'
+  }
+
+  return '未修改'
+})
+
+const saveStatusType = computed(() => {
+  if (saveStatus.value === 'saving') {
+    return 'warning'
+  }
+
+  if (saveStatus.value === 'saved') {
+    return 'success'
+  }
+
+  if (saveStatus.value === 'error') {
+    return 'danger'
+  }
+
+  return 'info'
+})
+
+async function loadDocument() {
+  pageLoading.value = true
+  pageError.value = ''
+
+  try {
+    const result = await getDocumentById(docId.value)
+
+    if (!result.success || !result.data) {
+      pageError.value = result.error || '文档加载失败'
+      return
+    }
+
+    const serverTitle = result.data.title
+    const serverContent = result.data.content
+
+    form.title = serverTitle
+    form.content = serverContent
+
+    const restored = maybeRestoreLocalDraft(serverTitle, serverContent)
+    localDraftRestored.value = restored
+
+    saveStatus.value = restored ? 'idle' : 'saved'
+    saveErrorMessage.value = ''
+    isLoaded.value = true
+
+    if (restored) {
+      ElMessage.info('已恢复本地草稿，等待自动保存')
+    }
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : '文档加载失败'
+  } finally {
+    pageLoading.value = false
+  }
+}
+
+async function doSave() {
+  if (!isLoaded.value) {
+    return
+  }
+
+  if (!form.title.trim()) {
+    saveStatus.value = 'error'
+    saveErrorMessage.value = '标题不能为空'
+    return
+  }
+
+  saveStatus.value = 'saving'
+  saveErrorMessage.value = ''
+
+  const result = await updateDocument(docId.value, {
+    title: form.title,
+    content: form.content,
+  })
+
+  if (!result.success) {
+    saveStatus.value = 'error'
+    saveErrorMessage.value = result.error || '保存失败'
+    return
+  }
+
+  clearDocumentDraft(docId.value)
+  localDraftRestored.value = false
+  saveStatus.value = 'saved'
+  void track(ANALYTICS_EVENTS.DOCUMENT_SAVE, {
+    document_id: docId.value,
+    title: form.title,
+    content_length: form.content.length,
+    status: result.data?.status ?? 'unknown',
+  })
+}
+
+function scheduleSave() {
+  if (!isLoaded.value) {
+    return
+  }
+
+  saveStatus.value = 'idle'
+  saveErrorMessage.value = ''
+
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+  }
+
+  saveTimer = setTimeout(() => {
+    void doSave()
+  }, 800)
+}
+
+async function handleDelete() {
+  try {
+    await ElMessageBox.confirm('删除后不可恢复，确认删除该文档吗？', '删除确认', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  deleting.value = true
+
+  try {
+    const result = await deleteDocument(docId.value)
+
+    if (!result.success) {
+      ElMessage.error(result.error || '删除失败')
+      return
+    }
+
+    clearDocumentDraft(docId.value)
+    ElMessage.success('文档已删除')
+    void track(ANALYTICS_EVENTS.DOCUMENT_DELETE, {
+      document_id: docId.value,
+      from: 'doc_editor',
+    })
+    router.replace('/docs')
+  } finally {
+    deleting.value = false
+  }
+}
+
+function goBack() {
+  router.push('/docs')
+}
+
+function handleReplaceContent(nextContent: string) {
+  form.content = nextContent
+  ElMessage.success('已替换为 AI 结果')
+}
+
+function handleAppendContent(nextContent: string) {
+  const trimmed = nextContent.trim()
+
+  if (!trimmed) {
+    return
+  }
+
+  form.content = form.content.trim() ? `${form.content}\n\n${trimmed}` : trimmed
+  ElMessage.success('已插入到文档末尾')
+}
+
+async function ensureKnowledgeBasesLoaded() {
+  if (knowledgeBases.value.length > 0) {
+    return
+  }
+
+  knowledgeLoading.value = true
+
+  try {
+    const result = await getMyKnowledgeBases()
+    if (!result.success) {
+      throw new Error(result.error || '获取知识库失败')
+    }
+
+    knowledgeBases.value = result.data || []
+    selectedKnowledgeBaseId.value = knowledgeBases.value[0]?.id || ''
+  } finally {
+    knowledgeLoading.value = false
+  }
+}
+
+async function handleOpenJoinDialog() {
+  try {
+    await ensureKnowledgeBasesLoaded()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '获取知识库失败')
+    return
+  }
+
+  if (!knowledgeBases.value.length) {
+    ElMessage.warning('请先创建知识库')
+    return
+  }
+
+  joinDialogVisible.value = true
+}
+
+async function handleJoinKnowledgeBase() {
+  if (!selectedKnowledgeBaseId.value) {
+    ElMessage.warning('请选择知识库')
+    return
+  }
+
+  joining.value = true
+
+  try {
+    const result = await addDocumentToKnowledgeBase({
+      documentId: docId.value,
+      knowledgeBaseId: selectedKnowledgeBaseId.value,
+    })
+
+    if (!result.success || !result.data) {
+      ElMessage.error(result.error || '加入知识库失败')
+      return
+    }
+
+    joinDialogVisible.value = false
+    ElMessage.success('加入成功，已写入 ' + String(result.data.chunkCount) + ' 个文档切片')
+  } finally {
+    joining.value = false
+  }
+}
+
+watch(
+  () => [form.title, form.content],
+  () => {
+    if (!isLoaded.value) {
+      return
+    }
+
+    writeDocumentDraft(docId.value, form.title, form.content)
+    scheduleSave()
+  },
+)
+
+onBeforeUnmount(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+  }
+})
+
+void loadDocument()
+</script>
+
+<template>
+  <div class="editor-page" v-loading="pageLoading">
+    <div class="editor-topbar">
+      <el-button text @click="goBack">返回文档列表</el-button>
+      <div class="topbar-right">
+        <el-button type="primary" plain @click="handleOpenJoinDialog">加入知识库</el-button>
+        <el-tag :type="saveStatusType">{{ saveStatusText }}</el-tag>
+        <el-button type="danger" plain :loading="deleting" @click="handleDelete">删除文档</el-button>
+      </div>
+    </div>
+
+    <el-alert
+      v-if="pageError"
+      :title="pageError"
+      type="error"
+      show-icon
+      :closable="false"
+      class="page-alert"
+    />
+
+    <el-alert
+      v-if="saveStatus === 'error' && saveErrorMessage"
+      :title="saveErrorMessage"
+      type="error"
+      show-icon
+      :closable="false"
+      class="page-alert"
+    />
+
+    <el-alert
+      v-if="localDraftRestored"
+      title="已加载本地草稿，正在自动保存到云端"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="page-alert"
+    />
+
+    <div v-if="!pageError" class="editor-layout">
+      <el-card class="editor-card" shadow="never">
+        <el-form label-position="top">
+          <el-form-item label="文档标题" required>
+            <el-input v-model="form.title" maxlength="100" placeholder="请输入文档标题" />
+          </el-form-item>
+
+          <el-form-item label="正文内容">
+            <div class="md-editor-wrapper">
+              <MdEditor v-model="form.content" language="zh-CN" :preview="true" :auto-detect-code="true" />
+            </div>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <AIAssistantPanel
+        class="assistant-panel"
+        :current-content="form.content"
+        @replace-content="handleReplaceContent"
+        @append-content="handleAppendContent"
+      />
+    </div>
+
+    <el-dialog v-model="joinDialogVisible" title="加入知识库" width="520px" :close-on-click-modal="false">
+      <el-form label-position="top" v-loading="knowledgeLoading">
+        <el-form-item label="选择知识库" required>
+          <el-select v-model="selectedKnowledgeBaseId" placeholder="请选择知识库" style="width: 100%" filterable>
+            <el-option v-for="item in knowledgeBases" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+
+        <el-alert
+          title="加入后将读取当前文档内容并重新切片写入 knowledge_chunks，后续问答可检索到这些片段。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+      </el-form>
+
+      <template #footer>
+        <el-button @click="joinDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="joining" @click="handleJoinKnowledgeBase">确认加入</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped>
+.editor-page {
+  padding: 4px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-alert {
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-card {
+  border: 1px solid #e6edf6;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.assistant-panel {
+  height: 100%;
+}
+
+.md-editor-wrapper {
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.md-editor-wrapper :deep(.md-editor) {
+  height: 100%;
+}
+
+.md-editor-wrapper :deep(.md-editor-preview-wrapper) {
+  background: #fafbfc;
+}
+
+@media (max-width: 1200px) {
+  .editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .editor-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .topbar-right {
+    justify-content: space-between;
+  }
+}
+</style>
