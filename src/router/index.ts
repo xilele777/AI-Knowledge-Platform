@@ -22,12 +22,11 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        redirect: '/dashboard',
+        redirect: '/docs',
       },
       {
         path: 'dashboard',
-        name: 'Dashboard',
-        component: () => import('../views/DashboardView.vue'),
+        redirect: '/docs',
       },
       {
         path: 'docs',
@@ -38,6 +37,17 @@ const routes: RouteRecordRaw[] = [
         path: 'docs/:id',
         name: 'DocDetail',
         component: () => import('../views/docs/DocEditorView.vue'),
+        props: true,
+      },
+      {
+        path: 'shared',
+        name: 'Shared',
+        component: () => import('../views/shared/SharedListView.vue'),
+      },
+      {
+        path: 'shared/:id',
+        name: 'SharedDetail',
+        component: () => import('../views/shared/SharedDetailView.vue'),
         props: true,
       },
       {
@@ -54,7 +64,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'chat',
         name: 'Chat',
-        component: () => import('../views/ChatView.vue'),
+        component: () => import('../views/chat/ChatView.vue'),
       },
       {
         path: 'profile',

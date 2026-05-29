@@ -53,7 +53,6 @@ void loadFiles()
     <div class="page-header">
       <div>
         <h2 class="page-title">文件管理</h2>
-        <p class="page-subtitle">展示 knowledge_files 文件记录。</p>
       </div>
       <el-button :loading="loading" @click="loadFiles">刷新</el-button>
     </div>
@@ -72,26 +71,23 @@ void loadFiles()
         <el-empty v-if="!loading && rows.length === 0" description="暂无文件数据" />
 
         <el-table v-else :data="rows" border stripe>
-          <el-table-column prop="id" label="文件ID" min-width="220" />
-          <el-table-column prop="fileName" label="文件名" min-width="180" />
-          <el-table-column label="状态" min-width="120">
+          <el-table-column prop="fileName" label="文件名" min-width="200" />
+          <el-table-column label="状态" min-width="100">
             <template #default="scope">
               <el-tag size="small">{{ scope.row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="大小" min-width="110">
+          <el-table-column label="大小" min-width="100">
             <template #default="scope">
               {{ formatSize(scope.row.fileSize) }}
             </template>
           </el-table-column>
-          <el-table-column label="类型" min-width="150">
+          <el-table-column label="类型" min-width="120">
             <template #default="scope">
               {{ scope.row.mimeType || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="knowledgeBaseId" label="knowledge_base_id" min-width="220" />
-          <el-table-column prop="ownerId" label="owner_id" min-width="220" />
-          <el-table-column label="更新时间" min-width="180">
+          <el-table-column label="更新时间" min-width="160">
             <template #default="scope">
               {{ formatDate(scope.row.updatedAt) }}
             </template>

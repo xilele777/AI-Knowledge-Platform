@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { createKnowledgeBase, getMyKnowledgeBases } from '../../api/knowledge'
+import { createKnowledgeBase, deleteKnowledgeBase, getMyKnowledgeBases } from '../../api/knowledge'
 import type { CreateKnowledgeBaseInput, KnowledgeBaseListItem } from '../../types/knowledge'
 import KnowledgeCard from './components/KnowledgeCard.vue'
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
@@ -17,6 +17,7 @@ interface CreateKbForm {
 const router = useRouter()
 
 const loading = ref(false)
+const deleting = ref(false)
 const creating = ref(false)
 const createDialogVisible = ref(false)
 const errorMessage = ref('')
@@ -94,7 +95,7 @@ async function handleCreateKnowledgeBase() {
   try {
     const payload: CreateKnowledgeBaseInput = {
       name: createForm.name,
-      description: createForm.description || null,
+      description: createForm.description ?? null,
       status: 'active',
     }
 
@@ -121,6 +122,36 @@ async function handleCreateKnowledgeBase() {
   }
 }
 
+async function handleDeleteKnowledgeBase(id: string) {
+  try {
+    await ElMessageBox.confirm('删除后不可恢复,确认删除该知识库吗?', '删除确认', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+    })
+
+    deleting.value = true
+    const result = await deleteKnowledgeBase(id)
+
+    if (!result.success) {
+      ElMessage.error(result.error || '删除失败')
+      return
+    }
+
+    ElMessage.success('删除成功')
+    await loadKnowledgeBases()
+  } catch (error) {
+    if (error instanceof Error && error.message) {
+      if (error.message.includes('cancel')) {
+        return
+      }
+      ElMessage.error(error.message)
+    }
+  } finally {
+    deleting.value = false
+  }
+}
+
 function handleEnterDetail(id: string) {
   router.push('/knowledge/' + id)
 }
@@ -133,7 +164,6 @@ void loadKnowledgeBases()
     <div class="page-header">
       <div>
         <h2 class="page-title">知识库列表</h2>
-        <p class="page-subtitle">集中管理你的知识库，支持快速创建和进入详情。</p>
       </div>
 
       <div class="page-actions">
@@ -162,7 +192,7 @@ void loadKnowledgeBases()
     <div v-loading="loading" class="content-wrapper">
       <el-empty
         v-if="!loading && filteredKnowledgeBases.length === 0"
-        :description="knowledgeBases.length === 0 ? '暂无知识库，点击右上角创建' : '没有匹配的知识库'"
+        :description="knowledgeBases.length === 0 ? '暂无知识库,点击右上角创建' : '没有匹配的知识库'"
       />
 
       <el-row v-else :gutter="16">
@@ -173,7 +203,7 @@ void loadKnowledgeBases()
           :sm="12"
           :lg="8"
         >
-          <KnowledgeCard :item="item" @open="handleEnterDetail" />
+          <KnowledgeCard :item="item" @open="handleEnterDetail" @delete="handleDeleteKnowledgeBase" />
         </el-col>
       </el-row>
     </div>
@@ -186,7 +216,7 @@ void loadKnowledgeBases()
     >
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-position="top">
         <el-form-item label="知识库名称" prop="name">
-          <el-input v-model="createForm.name" placeholder="例如：产品文档知识库" maxlength="80" />
+          <el-input v-model="createForm.name" placeholder="例如:产品文档知识库" maxlength="80" />
         </el-form-item>
 
         <el-form-item label="描述">
@@ -195,7 +225,7 @@ void loadKnowledgeBases()
             type="textarea"
             :rows="3"
             resize="vertical"
-            placeholder="可选：描述该知识库的用途"
+            placeholder="可选:描述该知识库的用途"
           />
         </el-form-item>
       </el-form>

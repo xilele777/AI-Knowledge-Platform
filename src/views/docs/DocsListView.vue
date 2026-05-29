@@ -155,7 +155,6 @@ void loadDocuments()
     <div class="docs-topbar">
       <div>
         <h2 class="page-title">我的文档</h2>
-        <p class="page-subtitle">管理你的知识文档，支持快速检索与编辑。</p>
       </div>
       <el-button type="primary" @click="openCreateDialog">新建文档</el-button>
     </div>
@@ -186,12 +185,12 @@ void loadDocuments()
     <div v-loading="loading" class="docs-content">
       <el-empty
         v-if="!loading && docs.length === 0"
-        description="暂无文档，点击“新建文档”开始创作"
+        description="暂无文档，点击「新建文档」开始创作"
       />
 
       <el-row v-else :gutter="16">
         <el-col v-for="item in docs" :key="item.id" :xs="24" :sm="12" :lg="8">
-          <DocumentCard :item="item" @open="handleOpenDoc" @remove="handleDeleteDoc" />
+          <DocumentCard :item="item" @open="handleOpenDoc" @remove="handleDeleteDoc" @update="loadDocuments" />
         </el-col>
       </el-row>
     </div>

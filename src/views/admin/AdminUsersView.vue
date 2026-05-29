@@ -39,7 +39,6 @@ void loadUsers()
     <div class="page-header">
       <div>
         <h2 class="page-title">用户管理</h2>
-        <p class="page-subtitle">展示 profiles 用户数据。</p>
       </div>
       <el-button :loading="loading" @click="loadUsers">刷新</el-button>
     </div>
@@ -58,13 +57,12 @@ void loadUsers()
         <el-empty v-if="!loading && rows.length === 0" description="暂无用户数据" />
 
         <el-table v-else :data="rows" border stripe>
-          <el-table-column prop="id" label="用户ID" min-width="240" />
           <el-table-column label="姓名" min-width="140">
             <template #default="scope">
               {{ scope.row.fullName || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="邮箱" min-width="180">
+          <el-table-column label="邮箱" min-width="200">
             <template #default="scope">
               {{ scope.row.email || '-' }}
             </template>
@@ -74,7 +72,7 @@ void loadUsers()
               <el-tag size="small" type="info">{{ scope.row.role || 'user' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="创建时间" min-width="180">
+          <el-table-column label="创建时间" min-width="160">
             <template #default="scope">
               {{ formatDate(scope.row.createdAt) }}
             </template>

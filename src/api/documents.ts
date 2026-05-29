@@ -22,6 +22,8 @@ type DocumentRow = {
   content_md: string
   summary: string | null
   status: DocumentStatus
+  is_shared: boolean
+  shared_at: string | null
   created_at: string
   updated_at: string
 }
@@ -78,16 +80,22 @@ function toDocument(row: DocumentRow): Document {
     content: row.content_md,
     summary: row.summary,
     status: row.status,
+    isShared: row.is_shared,
+    sharedAt: row.shared_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
-function toDocumentListItem(row: DocumentRow): DocumentListItem {
+function toDocumentListItem(row: DocumentRow & { owner_name?: string }): DocumentListItem {
   return {
     id: row.id,
     title: row.title,
     status: row.status,
+    isShared: row.is_shared,
+    sharedAt: row.shared_at,
+    ownerId: row.owner_id,
+    ownerName: row.owner_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -114,6 +122,8 @@ export async function createDocument(input: CreateDocumentInput): Promise<ApiRes
       content_md: input.content ?? '',
       summary: input.summary ?? null,
       status: input.status ?? 'draft',
+      is_shared: false,
+      shared_at: null,
     }
 
     if (!payload.title) {
@@ -205,6 +215,8 @@ export async function updateDocument(
       content_md?: string
       summary?: string | null
       status?: DocumentStatus
+      is_shared?: boolean
+      shared_at?: string | null
     } = {}
 
     if (typeof input.title === 'string') {
@@ -229,6 +241,11 @@ export async function updateDocument(
       payload.status = input.status
     }
 
+    if (typeof input.isShared === 'boolean') {
+      payload.is_shared = input.isShared
+      payload.shared_at = input.isShared ? new Date().toISOString() : null
+    }
+
     if (Object.keys(payload).length === 0) {
       return fail('没有可更新的字段')
     }
@@ -239,6 +256,63 @@ export async function updateDocument(
       .eq('id', id)
       .eq('owner_id', userId)
       .select('*')
+      .single<DocumentRow>()
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok(toDocument(data))
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function getSharedDocuments(
+  query: DocumentListQuery = {},
+): Promise<ApiResult<DocumentListItem[]>> {
+  try {
+    assertSupabaseConfigured()
+
+    const limit = query.limit ?? 50
+    const offset = query.offset ?? 0
+    const keyword = query.searchTitle?.trim()
+
+    let builder = supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .eq('is_shared', true)
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (keyword) {
+      builder = builder.ilike('title', `%${keyword}%`)
+    }
+
+    const { data, error } = await builder.returns<DocumentRow[]>()
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok((data || []).map((row) => ({
+      ...toDocumentListItem(row),
+      ownerName: '匿名用户',
+    })))
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function getSharedDocumentById(id: string): Promise<ApiResult<Document>> {
+  try {
+    assertSupabaseConfigured()
+
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .eq('id', id)
+      .eq('is_shared', true)
       .single<DocumentRow>()
 
     if (error) {
@@ -376,6 +450,8 @@ export async function addDocumentToKnowledgeBase(
           documentTitle: documentData.title,
         },
       })),
+    }, {
+      generateEmbeddings: true,
     })
 
     let insertedCount = insertResult.data?.insertedCount ?? 0
@@ -422,6 +498,8 @@ export async function addDocumentToKnowledgeBase(
             syntheticFileId: fallbackFile.data?.id,
           },
         })),
+      }, {
+        generateEmbeddings: true,
       })
 
       if (!retryResult.success || !retryResult.data) {

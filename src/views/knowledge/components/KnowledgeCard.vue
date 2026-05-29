@@ -8,6 +8,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'open', id: string): void
+  (e: 'delete', id: string): void
 }>()
 
 const statusTagType = computed(() => {
@@ -26,6 +27,11 @@ function formatDate(dateText: string): string {
 function handleOpen() {
   emit('open', props.item.id)
 }
+
+function handleDelete(event: MouseEvent) {
+  event.stopPropagation()
+  emit('delete', props.item.id)
+}
 </script>
 
 <template>
@@ -43,6 +49,7 @@ function handleOpen() {
     </div>
 
     <div class="actions">
+      <el-button type="danger" link @click.stop="handleDelete">删除</el-button>
       <el-button type="primary" link @click.stop="handleOpen">进入详情</el-button>
     </div>
   </el-card>

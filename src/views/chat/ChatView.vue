@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import {
   createChat,
   createChatMessage,
   getChatMessages,
   getKnowledgeChunksForQa,
   getMyChats,
+  deleteChat,
 } from '../../api/chat'
 import {
   getMyKnowledgeBases,
   normalizeKnowledgeQaConfig,
   updateKnowledgeBaseQaConfig,
 } from '../../api/knowledge'
-import { useAIStream } from '../../composables/useAIStream'
+
+import { useAiConfigStore } from '../../stores/aiConfig'
 import type {
   ChatAnswerMode,
   ChatListItem,
@@ -30,14 +33,16 @@ import {
   type RetrieveChunkInput,
   type RetrievedChunk,
 } from '../../utils/retrieveChunks'
+import { createEmbedding, findTopSimilarChunks, type SimilarChunk } from '../../utils/vectorEmbedding'
 import { buildGeneralAiPrompt, buildKnowledgeEnhancedPrompt } from '../../utils/buildQaPrompt'
 import ChatInput from './components/ChatInput.vue'
 import ChatMessageList from './components/ChatMessageList.vue'
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
+import { generateAiTextStream } from '../../api/ai'
 
 const route = useRoute()
-const stream = useAIStream()
+const aiConfigStore = useAiConfigStore()
 
 const loadingChats = ref(false)
 const loadingMessages = ref(false)
@@ -54,12 +59,10 @@ const activeChatId = ref('')
 const selectedKnowledgeBaseId = ref('')
 const lastQuestion = ref('')
 const lastQuestionChatId = ref('')
-const streamingAssistantId = ref('')
 
 const qaConfigForm = reactive<KnowledgeQaConfig>(normalizeKnowledgeQaConfig(null))
 
 const hasChats = computed(() => chats.value.length > 0)
-const hasMessages = computed(() => messages.value.length > 0)
 const canRegenerate = computed(() => Boolean(lastQuestion.value && lastQuestionChatId.value))
 
 const activeChat = computed(() => chats.value.find((item) => item.id === activeChatId.value) || null)
@@ -71,8 +74,7 @@ const selectedKnowledgeBaseName = computed(() => {
 
 const qaSummaryText = computed(() => {
   const modeText = qaConfigForm.useKnowledgeEnhanced ? '知识增强优先' : '纯 AI 回答'
-  const providerText = qaConfigForm.aiProvider === 'custom' ? '自定义模型' : '默认模型'
-  return modeText + ' / ' + providerText
+  return modeText
 })
 
 const canSaveQaConfig = computed(() => Boolean(selectedKnowledgeBaseId.value))
@@ -82,10 +84,10 @@ function applyQaConfig(config: KnowledgeQaConfig) {
   qaConfigForm.systemPrompt = normalized.systemPrompt
   qaConfigForm.answerStyle = normalized.answerStyle
   qaConfigForm.useKnowledgeEnhanced = normalized.useKnowledgeEnhanced
-  qaConfigForm.aiProvider = normalized.aiProvider
-  qaConfigForm.customAi.baseUrl = normalized.customAi.baseUrl
-  qaConfigForm.customAi.apiKey = normalized.customAi.apiKey
-  qaConfigForm.customAi.model = normalized.customAi.model
+  qaConfigForm.aiProvider = 'custom'
+  qaConfigForm.customAi.baseUrl = ''
+  qaConfigForm.customAi.apiKey = ''
+  qaConfigForm.customAi.model = ''
 }
 
 function applyQaConfigFromSelectedKnowledgeBase() {
@@ -98,11 +100,11 @@ function getQaConfigRuntimeSnapshot(): KnowledgeQaConfig {
     systemPrompt: qaConfigForm.systemPrompt,
     answerStyle: qaConfigForm.answerStyle,
     useKnowledgeEnhanced: qaConfigForm.useKnowledgeEnhanced,
-    aiProvider: qaConfigForm.aiProvider,
+    aiProvider: 'custom',
     customAi: {
-      baseUrl: qaConfigForm.customAi.baseUrl,
-      apiKey: qaConfigForm.customAi.apiKey,
-      model: qaConfigForm.customAi.model,
+      baseUrl: '',
+      apiKey: '',
+      model: '',
     },
   })
 }
@@ -112,11 +114,11 @@ function getQaConfigSaveSnapshot(): KnowledgeQaConfig {
     systemPrompt: qaConfigForm.systemPrompt,
     answerStyle: qaConfigForm.answerStyle,
     useKnowledgeEnhanced: qaConfigForm.useKnowledgeEnhanced,
-    aiProvider: qaConfigForm.aiProvider,
+    aiProvider: 'custom',
     customAi: {
-      baseUrl: qaConfigForm.customAi.baseUrl,
+      baseUrl: '',
       apiKey: '',
-      model: qaConfigForm.customAi.model,
+      model: '',
     },
   })
 }
@@ -131,14 +133,11 @@ watch(
 function formatDate(text: string): string {
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) {
-    return '--'
+    return ''
   }
-
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+  return date.toLocaleDateString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
   })
 }
 
@@ -179,7 +178,6 @@ function buildLocalPendingMessage(input: {
   errorMessage?: string | null
 }): ChatMessage {
   const now = new Date().toISOString()
-
   return {
     id: 'pending-' + String(Date.now()) + '-' + String(Math.random()),
     chatId: input.chatId,
@@ -228,10 +226,47 @@ async function prepareSmartQa(
       throw new Error(chunkResult.error || '查询知识切片失败')
     }
 
-    retrieved = retrieveRelevantChunks(question, mapChunksToRetrieveInputs(chunkResult.data), {
-      topK: 5,
-      minScore: 0.03,
-    })
+    const chunks = chunkResult.data
+    const chunksWithEmbeddings = chunks.filter((chunk) => chunk.embedding !== null)
+
+    if (chunksWithEmbeddings.length > 0 && aiConfigStore.isComplete) {
+      try {
+        const config = await aiConfigStore.ensureConfig()
+        const embeddingResult = await createEmbedding(question, config)
+
+        const similarChunks = findTopSimilarChunks(
+          embeddingResult.embedding,
+          chunksWithEmbeddings.map((chunk) => ({
+            item: chunk,
+            embedding: chunk.embedding as number[],
+          })),
+          5,
+          0.1,
+        )
+
+        retrieved = similarChunks.map((result: SimilarChunk<KnowledgeChunkForQa>) => ({
+          id: result.item.id,
+          fileId: result.item.fileId,
+          documentId: result.item.documentId,
+          sourceType: result.item.sourceType,
+          sourceName: result.item.sourceName,
+          chunkIndex: result.item.chunkIndex,
+          content: result.item.content,
+          score: result.similarity,
+          hitCount: 0,
+          matchedKeywords: [],
+        }))
+      } catch (error) {
+        console.warn('[chat.prepareSmartQa] embedding retrieval failed, fallback to keyword retrieval:', error)
+      }
+    }
+
+    if (retrieved.length === 0) {
+      retrieved = retrieveRelevantChunks(question, mapChunksToRetrieveInputs(chunks), {
+        topK: 5,
+        minScore: 0.03,
+      })
+    }
   }
 
   const hasValuableSources = hasValuableRetrievedChunks(retrieved, {
@@ -316,35 +351,17 @@ async function loadMessages(chatId: string) {
   }
 }
 
-function handleStopGenerate() {
-  if (!sending.value) {
-    return
-  }
-
-  stream.stop()
-}
-
 function resetDraftSession() {
-  if (sending.value) {
-    handleStopGenerate()
-  }
-
   activeChatId.value = ''
   messages.value = []
   errorText.value = ''
 }
 
 async function switchChat(chat: ChatListItem) {
-  if (sending.value) {
-    handleStopGenerate()
-  }
-
   activeChatId.value = chat.id
-
   if (chat.knowledgeBaseId) {
     selectedKnowledgeBaseId.value = chat.knowledgeBaseId
   }
-
   await loadMessages(chat.id)
 }
 
@@ -411,26 +428,12 @@ async function persistAssistantFinal(input: {
   return assistantSaved.data
 }
 
-async function streamAssistantAnswer(input: {
+async function callAssistantAnswer(input: {
   chatId: string
   question: string
   qaConfig: KnowledgeQaConfig
   trackQuestionLength?: number
 }) {
-  const trimmedBaseUrl = input.qaConfig.customAi.baseUrl.trim()
-  const trimmedApiKey = input.qaConfig.customAi.apiKey.trim()
-  const trimmedModel = input.qaConfig.customAi.model.trim()
-
-  const requestedModel = input.qaConfig.aiProvider === 'custom' && trimmedModel ? trimmedModel : ''
-  const runtimeConfig =
-    input.qaConfig.aiProvider === 'custom' && (trimmedBaseUrl || trimmedApiKey || trimmedModel)
-      ? {
-          baseUrl: trimmedBaseUrl || undefined,
-          apiKey: trimmedApiKey || undefined,
-          model: trimmedModel || undefined,
-        }
-      : undefined
-
   const prepared = await prepareSmartQa(
     input.question,
     selectedKnowledgeBaseId.value || null,
@@ -447,48 +450,47 @@ async function streamAssistantAnswer(input: {
   })
 
   appendLocalMessage(localAssistantMessage)
-  streamingAssistantId.value = localAssistantMessage.id
 
-  let streamError: Error | null = null
+  let finalText = ''
+  let finalStatus: ChatMessageStatus = 'done'
+  let finalErrorMessage: string | null = null
 
   try {
-    await stream.start(
-      {
-        scene: 'kb-chat',
-        model: requestedModel || undefined,
-        runtimeConfig,
-        userPrompt: prepared.prompt,
-        contextChunks: prepared.contextChunks,
-        mode: prepared.mode,
-        temperature: 0.2,
-      },
-      {
-        onToken(token) {
-          updateMessageById(localAssistantMessage.id, (message) => ({
-            ...message,
-            content: message.content + token,
-          }))
-        },
-      },
+    const config = await aiConfigStore.ensureConfig()
+    if (!aiConfigStore.isComplete) {
+      throw new Error(`请先在个人中心配置 AI API 信息：${aiConfigStore.missingFields.join('、')}`)
+    }
+
+    const result = await generateAiTextStream(
+      { userPrompt: prepared.prompt },
+      config,
+      (chunk) => {
+        finalText += chunk
+        updateMessageById(localAssistantMessage.id, (message) => ({
+          ...message,
+          content: finalText,
+        }))
+      }
     )
+
+    if (!result.success) {
+      finalStatus = 'error'
+      finalErrorMessage = result.error || 'AI 回答失败'
+    } else {
+      finalStatus = 'done'
+    }
   } catch (error) {
-    streamError = error instanceof Error ? error : new Error('AI 回答失败')
+    finalStatus = 'error'
+    finalErrorMessage = error instanceof Error ? error.message : 'AI 回答失败'
   }
 
-  const finalLocal = messages.value.find((item) => item.id === localAssistantMessage.id)
-  const finalText = finalLocal?.content || ''
-  const stopped = stream.stoppedByUser.value
-  const isError = Boolean(streamError)
-
-  const finalStatus: ChatMessageStatus = isError ? 'error' : 'done'
-  const finalErrorMessage = isError
-    ? stopped
-      ? '用户手动停止生成'
-      : streamError?.message || 'AI 回答失败'
-    : null
+  if (finalStatus === 'error' && !finalText.trim()) {
+    finalText = 'AI 回答失败，请检查配置或稍后重试。'
+  }
 
   updateMessageById(localAssistantMessage.id, (message) => ({
     ...message,
+    content: finalText,
     status: finalStatus,
     errorMessage: finalErrorMessage,
   }))
@@ -514,7 +516,7 @@ async function streamAssistantAnswer(input: {
     updatedAt,
   })
 
-  if (!isError) {
+  if (finalStatus === 'done') {
     void track(ANALYTICS_EVENTS.QA_SEND, {
       chat_id: input.chatId,
       knowledge_base_id: selectedKnowledgeBaseId.value || null,
@@ -529,12 +531,8 @@ async function streamAssistantAnswer(input: {
     })
   }
 
-  if (isError && !stopped) {
-    throw streamError || new Error('AI 回答失败')
-  }
-
-  if (stopped) {
-    ElMessage.info('已停止生成，已保留当前内容')
+  if (finalStatus === 'error') {
+    ElMessage.error(finalErrorMessage || 'AI 回答失败')
   }
 }
 
@@ -574,7 +572,7 @@ async function handleSend(question: string) {
     lastQuestionChatId.value = chatId
 
     const qaConfigSnapshot = getQaConfigRuntimeSnapshot()
-    await streamAssistantAnswer({
+    await callAssistantAnswer({
       chatId,
       question,
       qaConfig: qaConfigSnapshot,
@@ -585,7 +583,6 @@ async function handleSend(question: string) {
     ElMessage.error(errorText.value)
   } finally {
     sending.value = false
-    streamingAssistantId.value = ''
   }
 }
 
@@ -610,7 +607,7 @@ async function handleRegenerate() {
 
   try {
     const qaConfigSnapshot = getQaConfigRuntimeSnapshot()
-    await streamAssistantAnswer({
+    await callAssistantAnswer({
       chatId,
       question: lastQuestion.value,
       qaConfig: qaConfigSnapshot,
@@ -620,7 +617,6 @@ async function handleRegenerate() {
     ElMessage.error(errorText.value)
   } finally {
     sending.value = false
-    streamingAssistantId.value = ''
   }
 }
 
@@ -646,7 +642,6 @@ async function handleSaveQaConfigAsDefault() {
       if (item.id !== selectedKnowledgeBaseId.value) {
         return item
       }
-
       return {
         ...item,
         qaConfig: savedConfig,
@@ -661,6 +656,44 @@ async function handleSaveQaConfigAsDefault() {
   }
 }
 
+async function handleDeleteChat(chatId: string, event: Event) {
+  event.stopPropagation()
+  
+  try {
+    const confirmed = await new Promise((resolve) => {
+      ElMessageBox.confirm('确定要删除这个会话吗？删除后无法恢复。', '删除确认', {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }).then(() => resolve(true)).catch(() => resolve(false))
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    const result = await deleteChat(chatId)
+    if (!result.success) {
+      throw new Error(result.error || '删除失败')
+    }
+
+    if (chatId === activeChatId.value) {
+      activeChatId.value = ''
+      messages.value = []
+      lastQuestion.value = ''
+      lastQuestionChatId.value = ''
+    }
+
+    chats.value = chats.value.filter((chat) => chat.id !== chatId)
+
+    ElMessage.success('会话已删除')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error instanceof Error ? error.message : '删除失败，请稍后重试')
+    }
+  }
+}
+
 function handleResetQaConfigDraft() {
   applyQaConfigFromSelectedKnowledgeBase()
 }
@@ -668,7 +701,7 @@ function handleResetQaConfigDraft() {
 async function bootstrap() {
   try {
     errorText.value = ''
-    await Promise.all([loadKnowledgeBases(), loadChats()])
+    await Promise.all([loadKnowledgeBases(), loadChats(), aiConfigStore.loadConfig()])
 
     const queryKb = typeof route.query.knowledgeBaseId === 'string' ? route.query.knowledgeBaseId : ''
     if (queryKb) {
@@ -706,98 +739,101 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="chat-page">
-    <el-alert
-      v-if="errorText"
-      :title="errorText"
-      type="error"
-      show-icon
-      :closable="false"
-      class="chat-error"
-    />
+  <div class="chat-app">
+    <div v-if="errorText" class="error-banner">
+      {{ errorText }}
+    </div>
 
     <div class="chat-layout">
-      <aside class="chat-sidebar" v-loading="loadingChats">
-        <div class="sidebar-top">
-          <div class="sidebar-title">历史会话</div>
-          <el-button size="small" @click="resetDraftSession">新建会话</el-button>
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h1 class="sidebar-title">AI 助手</h1>
+          <el-button size="small" @click="resetDraftSession" class="new-chat-btn">
+            新建对话
+          </el-button>
         </div>
 
-        <el-select v-model="selectedKnowledgeBaseId" placeholder="选择知识库" class="kb-select" filterable>
-          <el-option
-            v-for="kb in knowledgeBases"
-            :key="kb.id"
-            :label="kb.name"
-            :value="kb.id"
-          />
-        </el-select>
+        <div class="kb-selector">
+          <el-select v-model="selectedKnowledgeBaseId" placeholder="选择知识库" class="kb-select" filterable>
+            <el-option
+              v-for="kb in knowledgeBases"
+              :key="kb.id"
+              :label="kb.name"
+              :value="kb.id"
+            />
+          </el-select>
+        </div>
 
-        <el-empty v-if="!hasChats && !loadingChats" description="暂无历史会话" />
+        <div class="chat-list">
+          <div v-if="!hasChats && !loadingChats" class="empty-chats">
+            暂无历史对话
+          </div>
 
-        <div v-else class="chat-history">
           <div
             v-for="chat in chats"
             :key="chat.id"
-            class="history-item"
+            class="chat-item"
             :class="{ active: chat.id === activeChatId }"
             @click="switchChat(chat)"
           >
-            <div class="title">{{ chat.title }}</div>
-            <div class="time">{{ formatDate(chat.updatedAt) }}</div>
+            <div class="chat-item-content">
+              <div class="chat-title">{{ chat.title }}</div>
+              <div class="chat-date">{{ formatDate(chat.updatedAt) }}</div>
+            </div>
+            <el-button
+              type="danger"
+              size="small"
+              circle
+              @click="handleDeleteChat(chat.id, $event)"
+              class="delete-btn"
+            >
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </div>
         </div>
       </aside>
 
-      <section class="chat-main">
+      <main class="main-content">
         <header class="chat-header">
-          <div class="header-main">
-            <div>
-              <div class="header-title">智能问答</div>
-              <div class="header-subtitle">
-                当前知识库：{{ selectedKnowledgeBaseName }} ｜ 问答模式：{{ qaSummaryText }}
-              </div>
-            </div>
-            <el-button size="small" @click="showQaConfigDrawer = true">问答配置</el-button>
+          <div class="header-left">
+            <h2 class="header-title">智能对话</h2>
+            <p class="header-subtitle">
+              {{ selectedKnowledgeBaseName }} · {{ qaSummaryText }}
+            </p>
           </div>
+          <el-button size="small" @click="showQaConfigDrawer = true" class="settings-btn">
+            设置
+          </el-button>
         </header>
 
-        <div class="chat-content">
+        <div class="messages-container">
           <ChatMessageList :messages="messages" :loading="loadingMessages" />
-          <div v-if="!hasMessages && !loadingMessages" class="chat-empty-tip">
-            <el-empty description="输入问题开始智能问答：有高相关参考时增强回答，无有效参考时直接由通用 AI 回答" />
-          </div>
         </div>
 
-        <ChatInput
-          :loading="sending"
-          :can-regenerate="canRegenerate"
-          @send="handleSend"
-          @stop="handleStopGenerate"
-          @regenerate="handleRegenerate"
-        />
-      </section>
+        <div class="input-container">
+          <ChatInput
+            :loading="sending"
+            :can-regenerate="canRegenerate"
+            @send="handleSend"
+            @regenerate="handleRegenerate"
+          />
+        </div>
+      </main>
     </div>
 
     <el-drawer
       v-model="showQaConfigDrawer"
       title="问答配置"
-      size="540px"
+      size="420px"
       :destroy-on-close="false"
+      class="config-drawer"
     >
       <el-form label-position="top" class="qa-config-form">
-        <el-alert
-          title="AI 调用统一走 Supabase Edge Function，API Key 仅保存在 Supabase secrets。"
-          type="info"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 12px"
-        />
-
         <el-form-item label="System Prompt">
           <el-input
             v-model="qaConfigForm.systemPrompt"
             type="textarea"
-            :rows="5"
+            :rows="4"
             resize="vertical"
             maxlength="4000"
             show-word-limit
@@ -813,7 +849,7 @@ onMounted(() => {
             resize="vertical"
             maxlength="1000"
             show-word-limit
-            placeholder="可选：如“先结论后依据，控制在 3 条要点内”"
+            placeholder="可选：如 '先结论后依据，控制在 3 条要点内'"
           />
         </el-form-item>
 
@@ -825,45 +861,15 @@ onMounted(() => {
           />
         </el-form-item>
 
-        <el-form-item label="模型来源">
-          <el-radio-group v-model="qaConfigForm.aiProvider">
-            <el-radio value="default">默认模型（OPENAI_MODEL）</el-radio>
-            <el-radio value="custom">自定义模型名</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <template v-if="qaConfigForm.aiProvider === 'custom'">
-          <el-form-item label="baseUrl">
-            <el-input
-              v-model="qaConfigForm.customAi.baseUrl"
-              placeholder="https://api.scnet.cn/api/llm/v1"
-            />
-          </el-form-item>
-
-          <el-form-item label="apiKey">
-            <el-input
-              v-model="qaConfigForm.customAi.apiKey"
-              type="password"
-              show-password
-              placeholder="sk-..."
-            />
-            <div class="qa-config-hint">API Key 仅用于当前会话，不会保存到知识库默认配置。</div>
-          </el-form-item>
-
-          <el-form-item label="model">
-            <el-input v-model="qaConfigForm.customAi.model" placeholder="例如：MiniMax-M2.5" />
-          </el-form-item>
-        </template>
-
         <div class="qa-config-actions">
-          <el-button @click="handleResetQaConfigDraft">恢复知识库默认配置</el-button>
+          <el-button @click="handleResetQaConfigDraft">恢复默认</el-button>
           <el-button
             type="primary"
             :disabled="!canSaveQaConfig"
             :loading="savingQaConfig"
             @click="handleSaveQaConfigAsDefault"
           >
-            保存为当前知识库默认问答配置
+            保存为默认
           </el-button>
         </div>
       </el-form>
@@ -872,180 +878,233 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.chat-page {
+.chat-app {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  height: 100%;
-  min-height: 0;
+  height: 100vh;
+  background: #f3f4f6;
 }
 
-.chat-error {
-  margin-bottom: 2px;
-  flex-shrink: 0;
+.error-banner {
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 12px 24px;
+  font-size: 14px;
+  text-align: center;
 }
 
 .chat-layout {
   flex: 1;
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: 12px;
-  min-height: 0;
-}
-
-.chat-sidebar {
-  border: 1px solid #e3eaf5;
-  border-radius: 12px;
-  background: #fff;
-  padding: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  min-height: 0;
   overflow: hidden;
 }
 
-.sidebar-top {
+.sidebar {
+  width: 280px;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-header {
+  padding: 20px;
+  border-bottom: 1px solid #f3f4f6;
+  display: flex;
   align-items: center;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .sidebar-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #22324b;
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.new-chat-btn {
+  flex-shrink: 0;
+}
+
+.kb-selector {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f3f4f6;
 }
 
 .kb-select {
   width: 100%;
-  flex-shrink: 0;
 }
 
-.chat-history {
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow: auto;
-  padding-right: 2px;
-  flex: 1;
-  min-height: 0;
+  gap: 4px;
 }
 
-.history-item {
-  border: 1px solid #e6ecf7;
-  border-radius: 10px;
-  padding: 10px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.history-item:hover {
-  border-color: #b7cdf7;
-  background: #f6f9ff;
-}
-
-.history-item.active {
-  border-color: #79a9ff;
-  background: #edf4ff;
-}
-
-.history-item .title {
+.empty-chats {
+  text-align: center;
+  color: #9ca3af;
   font-size: 14px;
-  color: #1f2d3d;
+  padding: 24px 12px;
+}
+
+.chat-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-item:hover {
+  background: #f3f4f6;
+}
+
+.chat-item.active {
+  background: #eff6ff;
+}
+
+.chat-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
   line-height: 1.4;
   margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.history-item .time {
+.chat-item.active .chat-title {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.chat-date {
   font-size: 12px;
-  color: #8ea0b8;
+  color: #9ca3af;
 }
 
-.chat-main {
-  border: 1px solid #e3eaf5;
-  border-radius: 12px;
-  background: #fff;
+.delete-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.main-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow: hidden;
+  background: #ffffff;
 }
 
 .chat-header {
-  padding: 12px 14px;
-  border-bottom: 1px solid #e8edf4;
-  background: linear-gradient(90deg, #f8fbff 0%, #f3f9ff 100%);
-  flex-shrink: 0;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #fafafa;
 }
 
-.header-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.header-left {
+  flex: 1;
+  min-width: 0;
 }
 
 .header-title {
   font-size: 16px;
   font-weight: 600;
-  color: #20314a;
+  color: #111827;
+  margin: 0 0 4px 0;
 }
 
 .header-subtitle {
-  margin-top: 4px;
   font-size: 13px;
-  color: #5b6f8f;
+  color: #6b7280;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.chat-content {
+.settings-btn {
+  flex-shrink: 0;
+}
+
+.messages-container {
   flex: 1;
   min-height: 0;
-  position: relative;
-  overflow: auto;
+  overflow: hidden;
+  background: #fafafa;
 }
 
-.chat-empty-tip {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.input-container {
+  flex-shrink: 0;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
 }
 
 .qa-config-form {
-  padding-right: 6px;
+  padding-right: 10px;
 }
 
 .qa-config-actions {
-  margin-top: 4px;
+  margin-top: 24px;
   display: flex;
-  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
 }
 
-.qa-config-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #8ea0b8;
+.chat-list::-webkit-scrollbar {
+  width: 6px;
 }
 
-@media (max-width: 960px) {
-  .chat-layout {
-    grid-template-columns: 1fr;
+.chat-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-list::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.chat-list::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
   }
 
-  .chat-sidebar {
-    max-height: 260px;
-    flex-shrink: 0;
-  }
-
-  .header-main {
-    flex-direction: column;
-    align-items: stretch;
+  .sidebar.mobile-open {
+    transform: translateX(0);
   }
 }
 </style>

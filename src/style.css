@@ -7,20 +7,89 @@ body,
 #app {
   margin: 0;
   width: 100%;
-  min-min-min-height: 100vh;
-
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #f5f7fa;
-  color: #303133;
+  min-height: 100vh;
+  font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: var(--md-sys-color-background);
+  color: var(--md-sys-color-on-background);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+h1,
 h2,
+h3,
+h4,
+h5,
+h6,
 p {
-  m margin: 0;
-  argin: 0;
-  margin:
-}
+  margin: 0;
 }
 
-0;
+h1 {
+  font-size: var(--md-sys-typescale-display-small);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+}
+
+h2 {
+  font-size: var(--md-sys-typescale-headline-medium);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.25px;
+}
+
+h3 {
+  font-size: var(--md-sys-typescale-headline-small);
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+h4 {
+  font-size: var(--md-sys-typescale-title-large);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+h5 {
+  font-size: var(--md-sys-typescale-title-medium);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+p {
+  font-size: var(--md-sys-typescale-body-medium);
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface);
+}
+
+a {
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color var(--md-sys-transition-medium) var(--md-sys-motion-easing-standard);
+}
+
+a:hover {
+  color: #1557b0;
+  text-decoration: underline;
+}
+
+.page-container {
+  padding: var(--md-sys-spacing-lg);
+  max-width: 1200px;
+  margin: 0 auto;
+}.page-header {
+  margin-bottom: var(--md-sys-spacing-lg);
+}
+
+.page-title {
+  color: var(--md-sys-color-on-background);
+  font-weight: 400;
+}
+
+.page-subtitle {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
+  margin-top: var(--md-sys-spacing-xs);
 }

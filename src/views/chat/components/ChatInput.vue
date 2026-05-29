@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
 interface Props {
   loading?: boolean
@@ -9,7 +9,6 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   (event: 'send', value: string): void
-  (event: 'stop'): void
   (event: 'regenerate'): void
 }>()
 
@@ -31,33 +30,26 @@ function onKeydown(event: KeyboardEvent) {
     send()
   }
 }
-
-watch(
-  () => props.loading,
-  (loading) => {
-    if (loading) {
-      return
-    }
-  },
-)
 </script>
 
 <template>
   <div class="chat-input">
-    <el-input
-      v-model="text"
-      type="textarea"
-      :rows="3"
-      resize="none"
-      placeholder="输入你的问题，按 Enter 发送，Shift + Enter 换行"
-      :disabled="loading"
-      @keydown="onKeydown"
-    />
+    <div class="input-wrapper">
+      <el-input
+        v-model="text"
+        type="textarea"
+        :rows="3"
+        resize="none"
+        placeholder="输入你的问题，按 Enter 发送，Shift + Enter 换行"
+        :disabled="loading"
+        @keydown="onKeydown"
+        class="text-input"
+      />
+    </div>
     <div class="chat-input-footer">
-      <span class="tip">已启用流式输出，回答会边生成边显示。</span>
+      <span class="tip">请先在个人中心配置 AI API 信息。</span>
       <div class="actions">
         <el-button :disabled="loading || !canRegenerate" @click="emit('regenerate')">重新生成</el-button>
-        <el-button type="danger" plain :disabled="!loading" @click="emit('stop')">停止生成</el-button>
         <el-button type="primary" :loading="loading" @click="send">发送</el-button>
       </div>
     </div>
@@ -66,20 +58,41 @@ watch(
 
 <style scoped>
 .chat-input {
-  border-top: 1px solid #e8edf4;
-  padding: 12px;
-  background: #fff;
+  padding: 20px 24px;
+  background: #ffffff;
+}
+
+.input-wrapper {
+  margin-bottom: 12px;
+}
+
+.text-input :deep(.el-textarea__inner) {
+  border-radius: 12px;
+  border-color: #e5e7eb;
+  font-size: 15px;
+  line-height: 1.6;
+  padding: 12px 16px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.text-input :deep(.el-textarea__inner:hover) {
+  border-color: #3b82f6;
+}
+
+.text-input :deep(.el-textarea__inner:focus) {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .chat-input-footer {
-  margin-top: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 
 .tip {
-  color: #8492a6;
+  color: #9ca3af;
   font-size: 12px;
 }
 
@@ -87,5 +100,6 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 </style>

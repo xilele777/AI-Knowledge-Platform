@@ -35,6 +35,8 @@ const joining = ref(false)
 const knowledgeLoading = ref(false)
 const knowledgeBases = ref<KnowledgeBaseListItem[]>([])
 const selectedKnowledgeBaseId = ref('')
+const isShared = ref(false)
+const sharing = ref(false)
 
 const form = reactive({
   title: '',
@@ -108,6 +110,7 @@ async function loadDocument() {
 
     const serverTitle = result.data.title
     const serverContent = result.data.content
+    isShared.value = result.data.isShared
 
     form.title = serverTitle
     form.content = serverContent
@@ -126,6 +129,41 @@ async function loadDocument() {
     pageError.value = error instanceof Error ? error.message : '文档加载失败'
   } finally {
     pageLoading.value = false
+  }
+}
+
+async function handleToggleShare() {
+  try {
+    const action = isShared.value ? '取消共享' : '共享'
+    await ElMessageBox.confirm(
+      `确定要${action}该文档吗？${isShared.value ? '取消后其他用户将无法访问。' : '共享后其他用户可以在共享广场查看此文档。'}`,
+      `${action}确认`,
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    sharing.value = true
+
+    const result = await updateDocument(docId.value, {
+      isShared: !isShared.value,
+    })
+
+    if (!result.success) {
+      ElMessage.error(result.error || `${action}失败`)
+      return
+    }
+
+    isShared.value = !isShared.value
+    ElMessage.success(`${action}成功`)
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('cancel')) {
+      return
+    }
+  } finally {
+    sharing.value = false
   }
 }
 
@@ -324,37 +362,16 @@ void loadDocument()
       <el-button text @click="goBack">返回文档列表</el-button>
       <div class="topbar-right">
         <el-button type="primary" plain @click="handleOpenJoinDialog">加入知识库</el-button>
-        <el-tag :type="saveStatusType">{{ saveStatusText }}</el-tag>
-        <el-button type="danger" plain :loading="deleting" @click="handleDelete">删除文档</el-button>
+        <el-button :type="isShared ? 'info' : 'success'" plain :loading="sharing" @click="handleToggleShare">
+          {{ isShared ? '取消共享' : '共享' }}
+        </el-button>
+        <el-tag v-if="isShared" type="success" size="small">共享中</el-tag>
+        <el-tag :type="saveStatusType" size="small">{{ saveStatusText }}</el-tag>
+        <el-button type="danger" plain :loading="deleting" @click="handleDelete">删除</el-button>
       </div>
     </div>
 
-    <el-alert
-      v-if="pageError"
-      :title="pageError"
-      type="error"
-      show-icon
-      :closable="false"
-      class="page-alert"
-    />
 
-    <el-alert
-      v-if="saveStatus === 'error' && saveErrorMessage"
-      :title="saveErrorMessage"
-      type="error"
-      show-icon
-      :closable="false"
-      class="page-alert"
-    />
-
-    <el-alert
-      v-if="localDraftRestored"
-      title="已加载本地草稿，正在自动保存到云端"
-      type="warning"
-      show-icon
-      :closable="false"
-      class="page-alert"
-    />
 
     <div v-if="!pageError" class="editor-layout">
       <el-card class="editor-card" shadow="never">
@@ -365,7 +382,7 @@ void loadDocument()
 
           <el-form-item label="正文内容">
             <div class="md-editor-wrapper">
-              <MdEditor v-model="form.content" language="zh-CN" :preview="true" :auto-detect-code="true" />
+              <MdEditor v-model="form.content" language="zh-CN" :preview="false" :auto-detect-code="true" />
             </div>
           </el-form-item>
         </el-form>

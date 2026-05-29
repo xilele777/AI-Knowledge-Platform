@@ -3,10 +3,12 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  deleteKnowledgeBase,
   deleteKnowledgeFile,
   getKnowledgeBaseById,
   getKnowledgeDocumentSources,
   getKnowledgeFiles,
+  removeDocumentFromKnowledgeBase,
 } from '../../api/knowledge'
 import type { KnowledgeBase, KnowledgeDocumentSource, KnowledgeFileListItem } from '../../types/knowledge'
 import KnowledgeFileList from './components/KnowledgeFileList.vue'
@@ -17,6 +19,7 @@ const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
+const deleting = ref(false)
 const filesLoading = ref(false)
 const documentSourcesLoading = ref(false)
 const errorMessage = ref('')
@@ -175,6 +178,55 @@ async function handleDeleteFile(fileId: string) {
   await loadKnowledgeFiles()
 }
 
+async function handleRemoveDocument(knowledgeBaseId: string, documentId: string) {
+  try {
+    await ElMessageBox.confirm('确认从该知识库中移除该文档吗？', '移除确认', {
+      type: 'warning',
+      confirmButtonText: '确认移除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  const result = await removeDocumentFromKnowledgeBase(knowledgeBaseId, documentId)
+
+  if (!result.success) {
+    ElMessage.error(result.error || '移除失败')
+    return
+  }
+
+  ElMessage.success('移除成功')
+  await loadKnowledgeDocumentSourceList()
+}
+
+async function handleDeleteKnowledgeBase() {
+  try {
+    await ElMessageBox.confirm('删除后不可恢复，确认删除该知识库吗？', '删除确认', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  deleting.value = true
+  try {
+    const result = await deleteKnowledgeBase(knowledgeBaseId.value)
+
+    if (!result.success) {
+      ElMessage.error(result.error || '删除失败')
+      return
+    }
+
+    ElMessage.success('删除成功')
+    router.push('/knowledge')
+  } finally {
+    deleting.value = false
+  }
+}
+
 function goChat() {
   if (!knowledgeBaseId.value) {
     ElMessage.error('知识库 ID 无效')
@@ -218,6 +270,7 @@ void loadPageData()
       </div>
 
       <div class="page-actions">
+        <el-button type="danger" plain :loading="deleting" @click="handleDeleteKnowledgeBase">删除知识库</el-button>
         <el-button @click="loadPageData">刷新</el-button>
         <el-button type="primary" @click="goChat">进入问答页</el-button>
       </div>
@@ -286,7 +339,11 @@ void loadPageData()
           <div class="files-header">站内文档来源</div>
         </template>
 
-        <KnowledgeDocumentSourceList :loading="documentSourcesLoading" :items="documentSources" />
+        <KnowledgeDocumentSourceList
+          :loading="documentSourcesLoading"
+          :items="documentSources"
+          @remove="handleRemoveDocument"
+        />
       </el-card>
     </div>
   </div>

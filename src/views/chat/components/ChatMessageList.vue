@@ -17,322 +17,315 @@ const rows = computed(() => props.messages || [])
 function formatTime(text: string): string {
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) {
-    return '--'
+    return ''
   }
-
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
+  return date.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
-    minute: '2-digit',
+    minute: '2-digit'
   })
 }
 
-function roleLabel(role: ChatMessage['role']): string {
-  if (role === 'user') {
-    return '你'
-  }
-
-  if (role === 'assistant') {
-    return 'AI'
-  }
-
-  return '系统'
-}
-
-function modeLabel(mode: ChatMessage['answerMode']): string {
-  if (mode === 'knowledge-enhanced') {
-    return '知识增强'
-  }
-
-  if (mode === 'general-ai') {
-    return '通用 AI'
-  }
-
-  if (mode === 'strict-knowledge') {
-    return '严格知识库'
-  }
-
-  return ''
-}
-
-function modeTagType(mode: ChatMessage['answerMode']): 'success' | 'info' | 'warning' {
-  if (mode === 'knowledge-enhanced') {
-    return 'success'
-  }
-
-  if (mode === 'strict-knowledge') {
-    return 'warning'
-  }
-
-  return 'info'
-}
-
-function statusText(status: ChatMessage['status']): string {
-  if (status === 'streaming') {
-    return '生成中'
-  }
-
-  if (status === 'error') {
-    return '失败'
-  }
-
-  return '完成'
-}
-
-function statusTagType(status: ChatMessage['status']): 'warning' | 'danger' | 'success' {
-  if (status === 'streaming') {
-    return 'warning'
-  }
-
-  if (status === 'error') {
-    return 'danger'
-  }
-
-  return 'success'
-}
-
-/**
- * 从 AI 回复中分离思考过程和正式输出
- * 支持 <think>...</think> 标签或常见的思考格式
- */
 function parseMessageContent(content: string) {
-  let thinking = ''
   let answer = content
-
-  // 1. 优先查找 <think> 标签包裹的思考过程
   const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
   if (thinkMatch) {
-    thinking = thinkMatch[1].trim()
     answer = content.slice(thinkMatch.index! + thinkMatch[0].length).trim()
   }
-
-  // 2. 查找常见的思考标记
   const thinkRegex = /^(?:思考|思考过程|thinking|reasoning)[:：]\s*([\s\S]*?)(?=\n\s*(?:回答|输出|answer|output)[:：]|$)/i
   const thinkMatch2 = content.match(thinkRegex)
-  if (thinkMatch2 && !thinking) {
-    thinking = thinkMatch2[1].trim()
+  if (thinkMatch2 && !thinkMatch) {
     answer = content.slice(thinkMatch2.index! + thinkMatch2[0].length).trim()
   }
-
-  return { thinking, answer }
+  return answer
 }
 </script>
 
 <template>
-  <div class="chat-message-list">
-    <el-empty v-if="!rows.length && !loading" description="暂无消息，开始提问吧" />
+  <div class="message-list">
+    <div v-if="!rows.length && !loading" class="empty-state">
+      <div class="empty-icon">💬</div>
+      <div class="empty-text">开始对话</div>
+      <div class="empty-subtext">输入问题，AI 将为您解答</div>
+    </div>
 
-    <div v-else class="message-rows">
+    <div v-else class="messages">
       <div
         v-for="item in rows"
         :key="item.id"
-        class="message-row"
-        :class="{ user: item.role === 'user', assistant: item.role === 'assistant' }"
+        class="message"
+        :class="item.role"
       >
-        <div class="message-head">
-          <span class="role">{{ roleLabel(item.role) }}</span>
-          <el-tag
-            v-if="item.role === 'assistant' && item.answerMode"
-            size="small"
-            effect="light"
-            :type="modeTagType(item.answerMode)"
-            class="mode-tag"
-          >
-            {{ modeLabel(item.answerMode) }}
-          </el-tag>
-          <el-tag
-            v-if="item.role === 'assistant'"
-            size="small"
-            effect="plain"
-            :type="statusTagType(item.status)"
-          >
-            {{ statusText(item.status) }}
-          </el-tag>
-          <span class="time">{{ formatTime(item.createdAt) }}</span>
+        <div class="avatar">
+          <span v-if="item.role === 'user'" class="avatar-icon">👤</span>
+          <span v-else class="avatar-icon">🤖</span>
         </div>
-
-        <div v-if="item.role === 'assistant'" class="message-body">
-          <!-- 思考过程（如果有） -->
-          <div v-if="parseMessageContent(item.content).thinking" class="thinking-block">
-            <div class="thinking-header">
-              <span class="thinking-icon">🧠</span>
-              <span class="thinking-label">思考过程</span>
-            </div>
-            <div class="thinking-content">
-              <MdPreview :model-value="parseMessageContent(item.content).thinking" />
-            </div>
+        
+        <div class="content-wrapper">
+          <div class="message-header">
+            <span class="role-name">{{ item.role === 'user' ? '你' : 'AI' }}</span>
+            <span class="time">{{ formatTime(item.createdAt) }}</span>
+          </div>
+          
+          <div class="message-content">
+            <MdPreview :model-value="item.role === 'assistant' ? parseMessageContent(item.content) : item.content" />
           </div>
 
-          <!-- 正式输出 -->
-          <div class="answer-block">
-            <MdPreview :model-value="parseMessageContent(item.content).answer || item.content" />
+          <div v-if="item.role === 'assistant' && item.errorMessage" class="error-message">
+            {{ item.errorMessage }}
+          </div>
+          
+          <SourceChunks v-if="item.role === 'assistant' && item.sources.length > 0" :chunks="item.sources" />
+          
+          <div v-else-if="item.role === 'assistant' && item.status === 'done'" class="no-source">
+            通用 AI 回答
           </div>
         </div>
-
-        <!-- 用户消息直接显示 -->
-        <div v-else class="message-body">
-          <MdPreview :model-value="item.content" />
-        </div>
-
-        <div v-if="item.role === 'assistant' && item.errorMessage" class="error-tip">
-          {{ item.errorMessage }}
-        </div>
-        <SourceChunks v-if="item.role === 'assistant' && item.sources.length > 0" :chunks="item.sources" />
-        <div v-else-if="item.role === 'assistant' && item.status === 'done'" class="no-source-tip">本次回答未命中高相关参考，已由通用 AI 直接生成。</div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.chat-message-list {
-  padding: 16px;
-  background: linear-gradient(180deg, #f8fbff 0%, #f3f7fd 100%);
+.message-list {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px;
 }
 
-.message-rows {
+.empty-state {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.message-row {
-  max-width: 88%;
-  padding: 12px;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid #e6edf8;
-  box-shadow: 0 2px 8px rgba(15, 34, 66, 0.04);
-}
-
-.message-row.user {
-  margin-left: auto;
-  background: #edf5ff;
-  border-color: #cfe1ff;
-}
-
-.message-row.assistant {
-  margin-right: auto;
-}
-
-.message-head {
-  display: flex;
-  gap: 8px;
   align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #9ca3af;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.empty-subtext {
+  font-size: 14px;
+  color: #9ca3af;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.message {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.message.user .avatar {
+  background: #3b82f6;
+}
+
+.message.assistant .avatar {
+  background: #f3f4f6;
+}
+
+.content-wrapper {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.message.user .content-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 6px;
-  flex-wrap: wrap;
 }
 
-.mode-tag {
-  margin-left: auto;
+.message.user .message-header {
+  flex-direction: row-reverse;
 }
 
-.role {
-  font-size: 12px;
-  color: #3a4a5f;
+.role-name {
+  font-size: 13px;
   font-weight: 600;
+  color: #374151;
 }
 
 .time {
   font-size: 12px;
-  color: #94a0b2;
+  color: #9ca3af;
 }
 
-.message-body {
-  line-height: 1.7;
-  color: #1f2d3d;
-}
-
-/* Markdown 样式优化 */
-:deep(.md-preview) {
+.message-content {
+  padding: 12px 16px;
+  border-radius: 12px;
+  line-height: 1.6;
   font-size: 15px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
-:deep(.md-preview h1),
-:deep(.md-preview h2),
-:deep(.md-preview h3),
-:deep(.md-preview h4),
-:deep(.md-preview h5),
-:deep(.md-preview h6) {
-  margin-top: 16px;
-  margin-bottom: 8px;
-  color: #1f2d3d;
+.message.user .message-content {
+  background: white;
+  color: #111827;
+  border-radius: 12px 12px 4px 12px;
+  border: 1px solid #e5e7eb;
 }
 
-:deep(.md-preview p) {
+.message.assistant .message-content {
+  background: #f9fafb;
+  color: #111827;
+  border-radius: 12px 12px 12px 4px;
+  border: 1px solid #e5e7eb;
+}
+
+:deep(.message-content .md-preview) {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+:deep(.message-content .md-preview p) {
   margin: 8px 0;
 }
 
-:deep(.md-preview code) {
-  background-color: #f5f7fa;
+:deep(.message-content .md-preview p:first-child) {
+  margin-top: 0;
+}
+
+:deep(.message-content .md-preview p:last-child) {
+  margin-bottom: 0;
+}
+
+:deep(.message-content .md-preview code) {
+  background: rgba(0, 0, 0, 0.06);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 14px;
 }
 
-:deep(.md-preview pre) {
-  background-color: #1e1e1e;
-  padding: 12px;
+.message.user :deep(.message-content .md-preview code) {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:deep(.message-content .md-preview pre) {
+  background: #1f2937;
   border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
   overflow-x: auto;
-  margin: 10px 0;
 }
 
-:deep(.md-preview pre code) {
+:deep(.message-content .md-preview pre code) {
   background: transparent;
-  color: #d4d4d4;
+  color: #e5e7eb;
   padding: 0;
 }
 
-/* 思考过程样式 */
-.thinking-block {
-  margin-bottom: 12px;
-  border-left: 4px solid #86909c;
-  background: linear-gradient(90deg, #f2f4f7 0%, #ffffff 100%);
-  border-radius: 0 8px 8px 0;
-  padding: 10px 14px;
+:deep(.message-content .md-preview blockquote) {
+  border-left: 3px solid #3b82f6;
+  padding-left: 12px;
+  margin: 12px 0;
+  color: #6b7280;
 }
 
-.thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+.message.user :deep(.message-content .md-preview blockquote) {
+  border-left-color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.thinking-icon {
-  font-size: 16px;
+:deep(.message-content .md-preview ul),
+:deep(.message-content .md-preview ol) {
+  padding-left: 20px;
+  margin: 10px 0;
 }
 
-.thinking-label {
-  font-size: 13px;
-  color: #6b7785;
+:deep(.message-content .md-preview li) {
+  margin: 4px 0;
+}
+
+:deep(.message-content .md-preview h1),
+:deep(.message-content .md-preview h2),
+:deep(.message-content .md-preview h3) {
+  margin: 16px 0 8px 0;
   font-weight: 600;
 }
 
-.thinking-content {
-  font-size: 14px;
-  color: #5a6675;
+:deep(.message-content .md-preview h1) {
+  font-size: 20px;
 }
 
-:deep(.thinking-content .md-preview) {
-  font-size: 14px;
+:deep(.message-content .md-preview h2) {
+  font-size: 18px;
 }
 
-.answer-block {
-  margin-top: 6px;
+:deep(.message-content .md-preview h3) {
+  font-size: 16px;
 }
 
-.no-source-tip {
+.error-message {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 13px;
+}
+
+.no-source {
   margin-top: 8px;
   font-size: 12px;
-  color: #7a879a;
+  color: #9ca3af;
 }
 
-.error-tip {
-  margin-top: 8px;
-  color: #d03050;
-  font-size: 12px;
+.message-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.message-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-list::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
 }
 </style>

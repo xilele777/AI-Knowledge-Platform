@@ -1,5 +1,7 @@
 import { getCurrentUser } from './auth'
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
+import { createBatchEmbeddings } from '../utils/vectorEmbedding'
+import type { AiResolvedConfig } from '../utils/aiConfig'
 import type {
   ApiResult,
   BatchCreateKnowledgeChunksInput,
@@ -520,6 +522,83 @@ export async function deleteKnowledgeFile(id: string): Promise<ApiResult<boolean
   }
 }
 
+export async function deleteKnowledgeBase(id: string): Promise<ApiResult<boolean>> {
+  try {
+    assertSupabaseConfigured()
+    const userId = await requireUserId()
+
+    // 删除关联的文档切片
+    await supabase
+      .from(KNOWLEDGE_CHUNK_TABLE)
+      .delete()
+      .eq('knowledge_base_id', id)
+      .eq('owner_id', userId)
+
+    // 删除关联的文件
+    await supabase
+      .from(KNOWLEDGE_FILE_TABLE)
+      .delete()
+      .eq('knowledge_base_id', id)
+      .eq('owner_id', userId)
+
+    // 删除关联的文档关系
+    await supabase
+      .from(KNOWLEDGE_DOCUMENT_TABLE)
+      .delete()
+      .eq('knowledge_base_id', id)
+      .eq('owner_id', userId)
+
+    // 删除知识库本身
+    const { error } = await supabase
+      .from(KNOWLEDGE_BASE_TABLE)
+      .delete()
+      .eq('id', id)
+      .eq('owner_id', userId)
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok(true)
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function removeDocumentFromKnowledgeBase(
+  knowledgeBaseId: string,
+  documentId: string,
+): Promise<ApiResult<boolean>> {
+  try {
+    assertSupabaseConfigured()
+    const userId = await requireUserId()
+
+    // 删除该文档在该知识库中的切片
+    await supabase
+      .from(KNOWLEDGE_CHUNK_TABLE)
+      .delete()
+      .eq('knowledge_base_id', knowledgeBaseId)
+      .eq('document_id', documentId)
+      .eq('owner_id', userId)
+
+    // 删除文档与知识库的关联关系
+    const { error } = await supabase
+      .from(KNOWLEDGE_DOCUMENT_TABLE)
+      .delete()
+      .eq('knowledge_base_id', knowledgeBaseId)
+      .eq('document_id', documentId)
+      .eq('owner_id', userId)
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok(true)
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
 export async function getKnowledgeDocumentSources(
   knowledgeBaseId: string,
 ): Promise<ApiResult<KnowledgeDocumentSource[]>> {
@@ -602,6 +681,10 @@ export async function updateKnowledgeFileStatus(
 
 export async function batchInsertKnowledgeChunks(
   input: BatchCreateKnowledgeChunksInput,
+  options?: {
+    generateEmbeddings?: boolean
+    config?: AiResolvedConfig
+  },
 ): Promise<ApiResult<BatchWriteChunksResult>> {
   try {
     assertSupabaseConfigured()
@@ -615,7 +698,20 @@ export async function batchInsertKnowledgeChunks(
       return fail('chunks 不能为空')
     }
 
-    const payload = input.chunks.map((chunk) => ({
+    let chunksWithEmbeddings = input.chunks
+
+    if (options?.generateEmbeddings && options?.config) {
+      const embeddings = await createBatchEmbeddings(
+        input.chunks.map((chunk) => chunk.content),
+        options.config,
+      )
+      chunksWithEmbeddings = input.chunks.map((chunk, index) => ({
+        ...chunk,
+        embedding: embeddings[index].embedding,
+      }))
+    }
+
+    const payload = chunksWithEmbeddings.map((chunk) => ({
       knowledge_base_id: input.knowledgeBaseId,
       file_id: input.fileId ?? null,
       document_id: input.documentId ?? null,

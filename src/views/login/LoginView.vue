@@ -59,41 +59,68 @@ const handleSubmit = async () => {
 
 <template>
   <div class="auth-page">
-    <div class="bg-shape bg-shape-a" />
-    <div class="bg-shape bg-shape-b" />
+    <div class="auth-container">
+      <div class="auth-content">
+        <div class="app-brand">
+          <div class="brand-logo">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <rect width="48" height="48" rx="12" fill="#1a73e8"/>
+              <path d="M15 18h18v3H15v-3zm0 9h18v3H15v-3z" fill="white"/>
+            </svg>
+          </div>
+          <h1 class="brand-name">AI 知识库平台</h1>
+        </div>
 
-    <el-card class="auth-card" shadow="hover">
-      <div class="auth-header">
-        <h2>欢迎回来</h2>
-        <p>登录 AI 知识库协作平台</p>
+        <el-card class="auth-card" :body-style="{ padding: '32px' }">
+          <div class="auth-header">
+            <h2>欢迎回来</h2>
+            <p>登录以继续使用</p>
+          </div>
+
+          <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
+            <el-form-item label="邮箱地址" prop="email">
+              <el-input
+                v-model="form.email"
+                placeholder="you@example.com"
+                clearable
+                size="large"
+              />
+            </el-form-item>
+
+            <el-form-item label="密码" prop="password">
+              <el-input
+                v-model="form.password"
+                type="password"
+                show-password
+                placeholder="请输入密码"
+                clearable
+                size="large"
+                @keyup.enter="handleSubmit"
+              />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button
+                type="primary"
+                class="submit-btn"
+                :loading="userStore.loading"
+                @click="handleSubmit"
+                size="large"
+              >
+                登录
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <div class="auth-footer">
+            <span>还没有账号？</span>
+            <el-button link type="primary" @click="router.push('/register')" class="link-btn">
+              创建账号
+            </el-button>
+          </div>
+        </el-card>
       </div>
-
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
-        <el-form-item label="邮箱" prop="email">
-          <el-input v-model="form.email" placeholder="you@example.com" clearable />
-        </el-form-item>
-
-        <el-form-item label="密码" prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            show-password
-            placeholder="请输入密码"
-            clearable
-            @keyup.enter="handleSubmit"
-          />
-        </el-form-item>
-
-        <el-button type="primary" class="full-btn" :loading="userStore.loading" @click="handleSubmit">
-          登录
-        </el-button>
-      </el-form>
-
-      <div class="auth-footer">
-        <span>没有账号？</span>
-        <el-button link type="primary" @click="router.push('/register')">去注册</el-button>
-      </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
@@ -104,68 +131,96 @@ const handleSubmit = async () => {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  padding: 24px;
-  background: linear-gradient(160deg, #f2f7ff 0%, #f8fafc 50%, #eef6f5 100%);
-  overflow: hidden;
+  padding: var(--md-sys-spacing-lg);
+  background-color: var(--md-sys-color-background);
 }
 
-.bg-shape {
-  position: absolute;
-  border-radius: 999px;
-  filter: blur(4px);
+.auth-container {
+  width: 100%;
+  max-width: 440px;
 }
 
-.bg-shape-a {
-  top: -60px;
-  left: -80px;
-  width: 260px;
-  height: 260px;
-  background: rgba(64, 158, 255, 0.2);
+.auth-content {
+  width: 100%;
 }
 
-.bg-shape-b {
-  right: -60px;
-  bottom: -80px;
-  width: 300px;
-  height: 300px;
-  background: rgba(103, 194, 58, 0.16);
+.app-brand {
+  text-align: center;
+  margin-bottom: var(--md-sys-spacing-xl);
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--md-sys-spacing-md);
+}
+
+.brand-name {
+  font-size: var(--md-sys-typescale-headline-medium);
+  font-weight: 400;
+  color: var(--md-sys-color-on-background);
+  margin: 0;
+  letter-spacing: -0.5px;
 }
 
 .auth-card {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  max-width: 460px;
-  border: 1px solid #e5eef9;
+  border-radius: var(--md-sys-shape-corner-large);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background-color: var(--md-sys-color-surface-container-lowest);
 }
 
 .auth-header {
-  margin-bottom: 12px;
+  text-align: left;
+  margin-bottom: var(--md-sys-spacing-lg);
 }
 
 .auth-header h2 {
   margin: 0;
-  font-size: 26px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-headline-small);
+  font-weight: 400;
+  color: var(--md-sys-color-on-surface);
+  letter-spacing: -0.25px;
 }
 
 .auth-header p {
-  margin: 8px 0 0;
-  color: #637083;
-  font-size: 14px;
+  margin: var(--md-sys-spacing-xs) 0 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
-.full-btn {
+.submit-btn {
   width: 100%;
-  margin-top: 6px;
+  margin-top: var(--md-sys-spacing-xs);
+  height: 40px;
 }
 
 .auth-footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
-  color: #637083;
-  font-size: 14px;
+  margin-top: var(--md-sys-spacing-md);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
+  gap: var(--md-sys-spacing-xs);
+}
+
+.link-btn {
+  padding: 4px 8px;
+  font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .auth-page {
+    padding: var(--md-sys-spacing-md);
+  }
+
+  .brand-name {
+    font-size: var(--md-sys-typescale-headline-small);
+  }
+
+  .auth-card :deep(.el-card__body) {
+    padding: var(--md-sys-spacing-lg);
+  }
 }
 </style>

@@ -1,3 +1,5 @@
+import type { UserAiConfig } from '../types/ai'
+
 export interface AiResolvedConfig {
   baseUrl: string
   apiKey: string
@@ -10,37 +12,30 @@ export interface AiRuntimeConfigInput {
   model?: string
 }
 
-const DEFAULT_BASE_URL = 'https://api.scnet.cn/api/llm/v1'
-const DEFAULT_API_KEY = 'sk-OTcwLTExMjk3NTc0ODgzLTE3NzM0MTA3NTYzNDc='
-const DEFAULT_MODEL = 'MiniMax-M2.5'
+const DEFAULT_MODEL = 'gpt-4o-mini'
+const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 
-function normalizeBaseUrl(url: string): string {
-  return url.trim().replace(/\/$/, '')
+function normalizeBaseUrl(url: string | undefined | null): string {
+  if (!url) return DEFAULT_BASE_URL
+  const trimmed = url.trim()
+  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed
 }
 
-export function resolveAiConfig(): AiResolvedConfig {
-  const baseUrl = normalizeBaseUrl(import.meta.env.VITE_AI_BASE_URL || DEFAULT_BASE_URL)
-  const apiKey = (import.meta.env.VITE_AI_API_KEY || DEFAULT_API_KEY).trim()
-  const model = import.meta.env.VITE_AI_MODEL?.trim() || DEFAULT_MODEL
-
+export function resolveAiConfigFromUserConfig(userConfig: UserAiConfig | null): AiResolvedConfig {
   return {
-    baseUrl,
-    apiKey,
-    model,
+    baseUrl: normalizeBaseUrl(userConfig?.apiBaseUrl),
+    apiKey: userConfig?.apiKey?.trim() || '',
+    model: userConfig?.model?.trim() || DEFAULT_MODEL,
   }
 }
 
-export function getAiConfigMissingFields(config?: AiResolvedConfig): string[] {
-  const target = config || resolveAiConfig()
+export function getAiConfigMissingFields(config: AiResolvedConfig): string[] {
   const missing: string[] = []
-
-  if (!target.baseUrl) {
-    missing.push('API Base URL')
-  }
-
-  if (!target.apiKey) {
-    missing.push('API Key')
-  }
-
+  if (!config.baseUrl) missing.push('API Base URL')
+  if (!config.apiKey) missing.push('API Key')
   return missing
+}
+
+export function isAiConfigComplete(config: AiResolvedConfig): boolean {
+  return getAiConfigMissingFields(config).length === 0
 }

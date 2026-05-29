@@ -1,14 +1,16 @@
-export interface AiRequestRuntimeConfig {
-  baseUrl?: string
+export interface UserAiConfig {
+  id?: string
+  userId?: string
+  apiBaseUrl?: string
   apiKey?: string
   model?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface AiGenerateTextParams {
   systemPrompt?: string
   userPrompt: string
-  model?: string
-  runtimeConfig?: AiRequestRuntimeConfig
   temperature?: number
   maxTokens?: number
   topP?: number
@@ -17,37 +19,15 @@ export interface AiGenerateTextParams {
   signal?: AbortSignal
 }
 
-export interface AiUsage {
-  promptTokens?: number
-  completionTokens?: number
-  totalTokens?: number
-}
-
 export interface AiTextResultData {
   id: string
   model: string
   text: string
   finishReason: string | null
-  usage: AiUsage
 }
 
 export interface AiErrorDetail {
-  stage:
-  | 'config'
-  | 'request'
-  | 'network'
-  | 'http'
-  | 'response-parse'
-  | 'response-empty'
-  | 'unknown'
-  endpoint?: string
-  model?: string
-  statusCode?: number
-  statusText?: string
-  requestId?: string
-  providerMessage?: string
-  finishReason?: string | null
-  responseSnippet?: string
+  message: string
 }
 
 export interface AiResult<T> {

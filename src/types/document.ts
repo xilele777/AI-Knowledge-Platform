@@ -7,6 +7,8 @@ export interface Document {
   content: string
   summary: string | null
   status: DocumentStatus
+  isShared: boolean
+  sharedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -15,6 +17,10 @@ export interface DocumentListItem {
   id: string
   title: string
   status: DocumentStatus
+  isShared: boolean
+  sharedAt: string | null
+  ownerId?: string
+  ownerName?: string
   createdAt: string
   updatedAt: string
 }
@@ -31,6 +37,7 @@ export interface UpdateDocumentInput {
   content?: string
   summary?: string | null
   status?: DocumentStatus
+  isShared?: boolean
 }
 
 export interface DocumentListQuery {

@@ -82,5 +82,6 @@ export interface KnowledgeChunkForQa {
   content: string
   tokenCount: number | null
   meta: Record<string, unknown> | null
+  embedding: number[] | null
   createdAt: string
 }

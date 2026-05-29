@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { getAdminChatRecords, type AdminChatRecordItem } from '../../api/admin'
+import { getAdminChatRecords, adminDeleteChat, type AdminChatRecordItem } from '../../api/admin'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -27,6 +28,34 @@ const loadChats = async () => {
   loading.value = false
 }
 
+const handleDeleteChat = async (chatId: string) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这个会话吗？这将删除该会话的所有消息记录，删除后无法恢复。',
+      '删除确认',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    const result = await adminDeleteChat(chatId)
+    if (!result.success) {
+      throw new Error(result.error || '删除失败')
+    }
+
+    // Remove all records with this chatId from the list
+    rows.value = rows.value.filter((row) => row.chatId !== chatId)
+
+    ElMessage.success('会话已删除')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error instanceof Error ? error.message : '删除失败，请稍后重试')
+    }
+  }
+}
+
 void loadChats()
 </script>
 
@@ -35,7 +64,6 @@ void loadChats()
     <div class="page-header">
       <div>
         <h2 class="page-title">问答管理</h2>
-        <p class="page-subtitle">展示问答会话中的问题与回答记录。</p>
       </div>
       <el-button :loading="loading" @click="loadChats">刷新</el-button>
     </div>
@@ -54,22 +82,31 @@ void loadChats()
         <el-empty v-if="!loading && rows.length === 0" description="暂无问答记录" />
 
         <el-table v-else :data="rows" border stripe>
-          <el-table-column prop="chatId" label="会话ID" min-width="220" />
-          <el-table-column prop="title" label="会话标题" min-width="150" />
-          <el-table-column prop="ownerId" label="owner_id" min-width="220" />
-          <el-table-column label="问题" min-width="300" show-overflow-tooltip>
+          <el-table-column prop="title" label="会话标题" min-width="160" />
+          <el-table-column label="问题" min-width="320" show-overflow-tooltip>
             <template #default="scope">
               {{ scope.row.question }}
             </template>
           </el-table-column>
-          <el-table-column label="回答" min-width="360" show-overflow-tooltip>
+          <el-table-column label="回答" min-width="380" show-overflow-tooltip>
             <template #default="scope">
               {{ scope.row.answer || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="时间" min-width="180">
+          <el-table-column label="时间" min-width="160">
             <template #default="scope">
               {{ formatDate(scope.row.createdAt) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" min-width="100" fixed="right">
+            <template #default="scope">
+              <el-button
+                type="danger"
+                size="small"
+                @click="handleDeleteChat(scope.row.chatId)"
+              >
+                删除会话
+              </el-button>
             </template>
           </el-table-column>
         </el-table>

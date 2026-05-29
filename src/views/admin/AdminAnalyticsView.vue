@@ -20,22 +20,22 @@ const metricCards = computed(() => {
     {
       label: '总用户数',
       value: value?.userCount ?? 0,
-      desc: '来自 profiles',
+      color: 'var(--google-blue)',
     },
     {
       label: '总文档数',
       value: value?.documentCount ?? 0,
-      desc: '来自 documents',
+      color: 'var(--google-green)',
     },
     {
       label: '总知识库文件数',
       value: value?.knowledgeFileCount ?? 0,
-      desc: '来自 knowledge_files',
+      color: 'var(--google-yellow)',
     },
     {
       label: '总 AI 调用数',
       value: value?.aiCallCount ?? 0,
-      desc: 'qa_send + ai_writing_call',
+      color: 'var(--google-red)',
     },
   ]
 })
@@ -47,26 +47,32 @@ const extraCards = computed(() => {
     {
       label: '近 7 天登录总量',
       value: value?.login7dTotal ?? 0,
+      color: 'var(--google-purple)',
     },
     {
       label: '近 7 天 AI 调用总量',
       value: value?.aiCall7dTotal ?? 0,
+      color: 'var(--google-orange)',
     },
     {
       label: '近 7 天活跃用户',
       value: value?.activeUser7d ?? 0,
+      color: 'var(--google-blue)',
     },
     {
       label: '近 7 天新增文档',
       value: value?.documentCreated7d ?? 0,
+      color: 'var(--google-green)',
     },
     {
       label: '近 7 天新增知识文件',
       value: value?.fileCreated7d ?? 0,
+      color: 'var(--google-yellow)',
     },
     {
       label: '近 7 天日均 AI 调用',
       value: value?.avgAiCallsPerDay ?? 0,
+      color: 'var(--google-red)',
     },
   ]
 })
@@ -104,12 +110,14 @@ const loginTrendOption = computed(() => {
         smooth: true,
         areaStyle: {
           opacity: 0.16,
+          color: 'var(--google-blue)',
         },
         lineStyle: {
           width: 3,
+          color: 'var(--google-blue)',
         },
         itemStyle: {
-          color: '#22c55e',
+          color: 'var(--google-blue)',
         },
         data: trend.map((item) => item.value),
       },
@@ -148,7 +156,7 @@ const aiTrendOption = computed(() => {
         type: 'bar',
         barMaxWidth: 28,
         itemStyle: {
-          color: '#3b82f6',
+          color: 'var(--google-green)',
           borderRadius: [6, 6, 0, 0],
         },
         data: trend.map((item) => item.value),
@@ -186,7 +194,6 @@ void loadData()
     <div class="page-header">
       <div>
         <h2 class="page-title">统计分析</h2>
-        <p class="page-subtitle">全局运营概览、7 天趋势与热点事件。</p>
       </div>
       <el-button :loading="loading" @click="loadData">刷新</el-button>
     </div>
@@ -203,17 +210,16 @@ void loadData()
     <div v-loading="loading" class="analytics-content">
       <el-row :gutter="16">
         <el-col v-for="item in metricCards" :key="item.label" :xs="24" :sm="12" :lg="6">
-          <el-card class="metric-card" shadow="hover">
+          <el-card class="metric-card">
             <div class="metric-label">{{ item.label }}</div>
-            <div class="metric-value">{{ item.value }}</div>
-            <div class="metric-desc">{{ item.desc }}</div>
+            <div class="metric-value" :style="{ color: item.color }">{{ item.value }}</div>
           </el-card>
         </el-col>
       </el-row>
 
       <el-row :gutter="16" class="chart-row">
         <el-col :xs="24" :lg="12">
-          <el-card class="chart-card" shadow="never">
+          <el-card class="chart-card">
             <template #header>
               <div class="card-title">最近 7 天登录趋势</div>
             </template>
@@ -222,7 +228,7 @@ void loadData()
         </el-col>
 
         <el-col :xs="24" :lg="12">
-          <el-card class="chart-card" shadow="never">
+          <el-card class="chart-card">
             <template #header>
               <div class="card-title">最近 7 天 AI 调用趋势</div>
             </template>
@@ -233,21 +239,21 @@ void loadData()
 
       <el-row :gutter="16" class="extra-row">
         <el-col :xs="24" :lg="16">
-          <el-card class="extra-card" shadow="never">
+          <el-card class="extra-card">
             <template #header>
               <div class="card-title">补充指标（MVP+）</div>
             </template>
             <div class="extra-grid">
               <div v-for="item in extraCards" :key="item.label" class="extra-item">
                 <div class="extra-label">{{ item.label }}</div>
-                <div class="extra-value">{{ item.value }}</div>
+                <div class="extra-value" :style="{ color: item.color }">{{ item.value }}</div>
               </div>
             </div>
           </el-card>
         </el-col>
 
         <el-col :xs="24" :lg="8">
-          <el-card class="extra-card" shadow="never">
+          <el-card class="extra-card">
             <template #header>
               <div class="card-title">近 7 天热点事件</div>
             </template>
@@ -257,7 +263,7 @@ void loadData()
             <div v-else class="event-list">
               <div v-for="event in topEvents" :key="event.eventName" class="event-item">
                 <span class="event-name">{{ event.eventName }}</span>
-                <el-tag type="info">{{ event.count }}</el-tag>
+                <span class="event-count" style="color: var(--google-purple)">{{ event.count }}</span>
               </div>
             </div>
           </el-card>
@@ -283,12 +289,13 @@ void loadData()
 .page-title {
   margin: 0;
   font-size: 24px;
-  color: #1f2a37;
+  color: var(--md-sys-color-on-background);
+  font-weight: 400;
 }
 
 .page-subtitle {
   margin: 6px 0 0;
-  color: #6b7280;
+  color: var(--md-sys-color-on-surface-variant);
   font-size: 14px;
 }
 
@@ -301,26 +308,34 @@ void loadData()
 }
 
 .metric-card {
-  border: 1px solid #e6edf6;
+  border: none;
+  background-color: var(--md-sys-color-surface-container-low);
+  transition: all var(--md-sys-transition-medium) var(--md-sys-motion-easing-standard);
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-sys-elevation-level-2);
 }
 
 .metric-label {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .metric-value {
-  margin-top: 10px;
-  font-size: 32px;
+  margin-top: 12px;
+  font-size: 36px;
   line-height: 1;
-  font-weight: 700;
-  color: #111827;
+  font-weight: 600;
+  transition: color var(--md-sys-transition-medium);
 }
 
 .metric-desc {
   margin-top: 8px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--md-sys-color-outline);
 }
 
 .chart-row,
@@ -330,12 +345,13 @@ void loadData()
 
 .chart-card,
 .extra-card {
-  border: 1px solid #e7edf7;
+  border: none;
+  background-color: var(--md-sys-color-surface-container-lowest);
 }
 
 .card-title {
-  font-weight: 600;
-  color: #1f2a37;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
 }
 
 .trend-chart {
@@ -349,22 +365,22 @@ void loadData()
 }
 
 .extra-item {
-  border: 1px solid #e6edf6;
-  border-radius: 10px;
+  border-radius: var(--md-sys-shape-corner-medium);
   padding: 12px;
-  background: #fcfdff;
+  background: var(--md-sys-color-surface-container-low);
 }
 
 .extra-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--md-sys-color-on-surface-variant);
+  font-weight: 500;
 }
 
 .extra-value {
   margin-top: 8px;
-  font-size: 24px;
-  font-weight: 700;
-  color: #111827;
+  font-size: 26px;
+  font-weight: 600;
+  transition: color var(--md-sys-transition-medium);
 }
 
 .event-list {
@@ -377,14 +393,20 @@ void loadData()
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid #e6edf6;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-corner-small);
   padding: 10px;
+  background-color: var(--md-sys-color-surface-container-low);
 }
 
 .event-name {
-  font-size: 13px;
-  color: #1f2a37;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface);
+  font-weight: 500;
+}
+
+.event-count {
+  font-size: 18px;
+  font-weight: 600;
 }
 
 :deep(.el-col) {

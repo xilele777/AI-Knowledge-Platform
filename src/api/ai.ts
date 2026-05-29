@@ -1,11 +1,6 @@
-import type {
-  AiErrorDetail,
-  AiGenerateTextParams,
-  AiResult,
-  AiTextResultData,
-  AiUsage,
-} from '../types/ai'
-import { getAiConfigMissingFields, resolveAiConfig } from '../utils/aiConfig'
+import type { AiGenerateTextParams, AiResult, AiTextResultData } from '../types/ai'
+import type { AiResolvedConfig } from '../utils/aiConfig'
+import { getAiConfigMissingFields } from '../utils/aiConfig'
 
 type OpenAiMessage = {
   role: 'system' | 'user' | 'assistant'
@@ -15,20 +10,32 @@ type OpenAiMessage = {
 type OpenAiChatCompletionResponse = {
   id?: string
   model?: string
+  output_text?: unknown
   choices?: Array<{
     finish_reason?: string | null
+    text?: unknown
     message?: {
-      content?: string | null
+      content?: unknown
     }
   }>
-  usage?: {
-    prompt_tokens?: number
-    completion_tokens?: number
-    total_tokens?: number
-  }
   error?: {
     message?: string
   }
+}
+
+type OpenAiStreamPayload = {
+  id?: string
+  model?: string
+  choices?: Array<{
+    finish_reason?: string | null
+    delta?: {
+      content?: unknown
+    }
+    message?: {
+      content?: unknown
+    }
+    text?: unknown
+  }>
 }
 
 function ok<T>(data: T): AiResult<T> {
@@ -40,170 +47,157 @@ function ok<T>(data: T): AiResult<T> {
   }
 }
 
-function fail<T>(message: string, detail?: AiErrorDetail): AiResult<T> {
+function fail<T>(message: string): AiResult<T> {
   return {
     success: false,
     data: null,
     error: message,
-    errorDetail: detail || null,
-  }
-}
-
-function normalizeUnknownError(error: unknown): { message: string; detail: AiErrorDetail } {
-  if (error instanceof DOMException && error.name === 'AbortError') {
-    return {
-      message: 'AI 请求已取消',
-      detail: {
-        stage: 'request',
-        providerMessage: error.message,
-      },
-    }
-  }
-
-  if (error instanceof TypeError) {
-    return {
-      message: `网络请求失败：${error.message}`,
-      detail: {
-        stage: 'network',
-        providerMessage: error.message,
-      },
-    }
-  }
-
-  if (error instanceof Error) {
-    return {
-      message: error.message,
-      detail: {
-        stage: 'unknown',
-        providerMessage: error.message,
-      },
-    }
-  }
-
-  return {
-    message: 'AI 请求失败，请稍后重试',
-    detail: {
-      stage: 'unknown',
-    },
-  }
-}
-
-function toUsage(usage?: OpenAiChatCompletionResponse['usage']): AiUsage {
-  return {
-    promptTokens: usage?.prompt_tokens,
-    completionTokens: usage?.completion_tokens,
-    totalTokens: usage?.total_tokens,
+    errorDetail: { message },
   }
 }
 
 function buildMessages(params: AiGenerateTextParams): OpenAiMessage[] {
   const messages: OpenAiMessage[] = []
-
   if (params.systemPrompt?.trim()) {
-    messages.push({
-      role: 'system',
-      content: params.systemPrompt.trim(),
-    })
+    messages.push({ role: 'system', content: params.systemPrompt.trim() })
   }
-
-  messages.push({
-    role: 'user',
-    content: params.userPrompt.trim(),
-  })
-
+  messages.push({ role: 'user', content: params.userPrompt.trim() })
   return messages
 }
 
-function normalizeHttpError(status: number, payload: OpenAiChatCompletionResponse | null): string {
-  const upstreamMessage = payload?.error?.message
-
-  if (upstreamMessage) {
-    return `AI 服务错误(${status}): ${upstreamMessage}`
-  }
-
-  return `AI 服务错误(${status})`
-}
-
-function formatSnippet(raw: string, maxLength = 400): string {
-  if (!raw) {
-    return ''
-  }
-
-  const normalized = raw.replace(/\s+/g, ' ').trim()
-
-  if (normalized.length <= maxLength) {
-    return normalized
-  }
-
-  return `${normalized.slice(0, maxLength)}...`
-}
-
-function parseContentFromMessageContent(content: unknown): string {
+function extractTextFromUnknownContent(content: unknown): string {
   if (typeof content === 'string') {
-    return content.trim()
+    return content
   }
 
   if (!Array.isArray(content)) {
     return ''
   }
 
-  const chunks = content
+  return content
     .map((item) => {
       if (!item || typeof item !== 'object') {
         return ''
       }
 
-      const maybeText = (item as { text?: unknown }).text
-      return typeof maybeText === 'string' ? maybeText : ''
-    })
-    .filter(Boolean)
+      const record = item as Record<string, unknown>
+      if (typeof record.text === 'string') {
+        return record.text
+      }
 
-  return chunks.join('\n').trim()
+      if (typeof record.content === 'string') {
+        return record.content
+      }
+
+      if (
+        record.delta &&
+        typeof record.delta === 'object' &&
+        typeof (record.delta as Record<string, unknown>).text === 'string'
+      ) {
+        return (record.delta as Record<string, string>).text
+      }
+
+      return ''
+    })
+    .join('')
 }
 
-function extractTextFromPayload(payload: OpenAiChatCompletionResponse | null): {
-  text: string
-  finishReason: string | null
-} {
-  const choice = payload?.choices?.[0]
-  const finishReason = choice?.finish_reason ?? null
-
-  const messageText = parseContentFromMessageContent(choice?.message?.content)
-
-  if (messageText) {
-    return { text: messageText, finishReason }
+function extractFirstDeepText(node: unknown, depth = 0): string {
+  if (depth > 8 || node == null) {
+    return ''
   }
 
-  const fallbackText = (choice as { text?: unknown } | undefined)?.text
+  if (typeof node === 'string') {
+    const text = node.trim()
+    return text.length > 3 ? text : ''
+  }
 
-  if (typeof fallbackText === 'string' && fallbackText.trim()) {
-    return {
-      text: fallbackText.trim(),
-      finishReason,
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = extractFirstDeepText(item, depth + 1)
+      if (found) {
+        return found
+      }
+    }
+    return ''
+  }
+
+  if (typeof node !== 'object') {
+    return ''
+  }
+
+  const record = node as Record<string, unknown>
+  const prioritizedKeys = ['content', 'text', 'output_text', 'answer', 'response', 'message', 'result']
+  for (const key of prioritizedKeys) {
+    if (key in record) {
+      const found = extractFirstDeepText(record[key], depth + 1)
+      if (found) {
+        return found
+      }
     }
   }
 
-  return {
-    text: '',
-    finishReason,
+  for (const value of Object.values(record)) {
+    const found = extractFirstDeepText(value, depth + 1)
+    if (found) {
+      return found
+    }
   }
+
+  return ''
 }
 
-export async function generateAiText(params: AiGenerateTextParams): Promise<AiResult<AiTextResultData>> {
+export function extractTextFromCompletionPayload(payload: OpenAiChatCompletionResponse | null): string {
+  if (!payload || typeof payload !== 'object') {
+    return ''
+  }
+
+  const directOutput = extractTextFromUnknownContent(payload.output_text)
+  if (directOutput) {
+    return directOutput
+  }
+
+  const choices = Array.isArray(payload.choices) ? payload.choices : []
+  for (const item of choices) {
+    const fromMessage = extractTextFromUnknownContent(item.message?.content)
+    if (fromMessage) {
+      return fromMessage
+    }
+
+    const fromText = extractTextFromUnknownContent(item.text)
+    if (fromText) {
+      return fromText
+    }
+  }
+
+  return extractFirstDeepText(payload)
+}
+
+function extractStreamDeltaText(payload: OpenAiStreamPayload): string {
+  const choice = payload.choices?.[0]
+  if (!choice) {
+    return ''
+  }
+
+  return (
+    extractTextFromUnknownContent(choice.delta?.content) ||
+    extractTextFromUnknownContent(choice.message?.content) ||
+    extractTextFromUnknownContent(choice.text)
+  )
+}
+
+export async function generateAiText(
+  params: AiGenerateTextParams,
+  config: AiResolvedConfig,
+): Promise<AiResult<AiTextResultData>> {
   try {
     if (!params.userPrompt?.trim()) {
-      return fail('userPrompt 不能为空')
+      return fail('用户提示不能为空')
     }
 
-    const config = resolveAiConfig()
     const missingFields = getAiConfigMissingFields(config)
-
     if (missingFields.length > 0) {
-      return fail(`AI 配置不完整，请先配置：${missingFields.join(', ')}`, {
-        stage: 'config',
-        endpoint: config.baseUrl ? `${config.baseUrl}/chat/completions` : undefined,
-        model: config.model,
-      })
+      return fail(`AI配置不完整，请先配置: ${missingFields.join(', ')}`)
     }
 
     const endpoint = `${config.baseUrl}/chat/completions`
@@ -211,7 +205,7 @@ export async function generateAiText(params: AiGenerateTextParams): Promise<AiRe
       model: config.model,
       messages: buildMessages(params),
       stream: false,
-      temperature: params.temperature,
+      temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens,
       top_p: params.topP,
       presence_penalty: params.presencePenalty,
@@ -229,81 +223,162 @@ export async function generateAiText(params: AiGenerateTextParams): Promise<AiRe
     })
 
     let payload: OpenAiChatCompletionResponse | null = null
-    let rawResponseText = ''
-
     try {
-      rawResponseText = await response.text()
-
-      if (rawResponseText) {
-        payload = JSON.parse(rawResponseText) as OpenAiChatCompletionResponse
-      }
+      payload = await response.json()
     } catch {
-      return fail('AI 响应解析失败，返回内容不是合法 JSON', {
-        stage: 'response-parse',
-        endpoint,
-        model: config.model,
-        statusCode: response.status,
-        statusText: response.statusText,
-        requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || undefined,
-        responseSnippet: formatSnippet(rawResponseText),
-      })
+      return fail('AI响应解析失败')
     }
 
     if (!response.ok) {
-      return fail(normalizeHttpError(response.status, payload), {
-        stage: 'http',
-        endpoint,
-        model: config.model,
-        statusCode: response.status,
-        statusText: response.statusText,
-        requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || undefined,
-        providerMessage: payload?.error?.message,
-        responseSnippet: formatSnippet(rawResponseText),
-      })
+      const errorMsg = payload?.error?.message || `AI服务错误 (${response.status})`
+      return fail(errorMsg)
     }
 
-    const extraction = extractTextFromPayload(payload)
-    const text = extraction.text
-
+    const choice = payload?.choices?.[0]
+    const text = extractTextFromCompletionPayload(payload).trim()
     if (!text) {
-      return fail('AI 返回内容为空（响应结构与预期不一致或模型未返回文本）', {
-        stage: 'response-empty',
-        endpoint,
-        model: payload?.model || config.model,
-        statusCode: response.status,
-        statusText: response.statusText,
-        requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || undefined,
-        finishReason: extraction.finishReason,
-        responseSnippet: formatSnippet(rawResponseText),
-      })
+      return fail('AI返回内容为空')
     }
 
     return ok({
       id: payload?.id || '',
       model: payload?.model || config.model,
       text,
-      finishReason: extraction.finishReason,
-      usage: toUsage(payload?.usage),
+      finishReason: choice?.finish_reason || null,
     })
   } catch (error) {
-    const normalized = normalizeUnknownError(error)
-    return fail(normalized.message, normalized.detail)
+    if (error instanceof Error && error.name === 'AbortError') {
+      return fail('请求已取消')
+    }
+    const message = error instanceof Error ? error.message : 'AI请求失败'
+    return fail(message)
   }
 }
 
-export function getAiConfigStatus() {
-  const config = resolveAiConfig()
-  const missingFields = getAiConfigMissingFields(config)
+export async function generateAiTextStream(
+  params: AiGenerateTextParams,
+  config: AiResolvedConfig,
+  onChunk: (chunk: string) => void,
+): Promise<AiResult<{ id: string; model: string; finishReason: string | null }>> {
+  try {
+    if (!params.userPrompt?.trim()) {
+      return fail('用户提示不能为空')
+    }
 
-  return {
-    configured: missingFields.length === 0,
-    missingFields,
+    const missingFields = getAiConfigMissingFields(config)
+    if (missingFields.length > 0) {
+      return fail(`AI配置不完整，请先配置: ${missingFields.join(', ')}`)
+    }
+
+    const endpoint = `${config.baseUrl}/chat/completions`
+    const requestBody = {
+      model: config.model,
+      messages: buildMessages(params),
+      stream: true,
+      temperature: params.temperature ?? 0.7,
+      max_tokens: params.maxTokens,
+      top_p: params.topP,
+      presence_penalty: params.presencePenalty,
+      frequency_penalty: params.frequencyPenalty,
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: params.signal,
+    })
+
+    if (!response.ok) {
+      let errorMsg = `AI服务错误 (${response.status})`
+      try {
+        const errorPayload = await response.json()
+        errorMsg = errorPayload?.error?.message || errorMsg
+      } catch {
+        // 忽略解析错误，使用默认错误信息
+      }
+      return fail(errorMsg)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      return fail('无法读取响应流')
+    }
+
+    const decoder = new TextDecoder()
+    let id = ''
+    let model = config.model
+    let finishReason: string | null = null
+    let buffer = ''
+
+    const processEvent = (eventText: string) => {
+      const dataLines = eventText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice('data: '.length))
+
+      if (dataLines.length === 0) {
+        return
+      }
+
+      const dataText = dataLines.join('\n').trim()
+      if (!dataText || dataText === '[DONE]') {
+        return
+      }
+
+      try {
+        const data = JSON.parse(dataText) as OpenAiStreamPayload
+        id = data.id || id
+        model = data.model || model
+
+        const choice = data.choices?.[0]
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason
+        }
+
+        const content = extractStreamDeltaText(data)
+        if (content) {
+          onChunk(content)
+        }
+      } catch {
+        // 忽略单个 SSE 事件解析错误，继续处理后续事件。
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() ?? ''
+
+      for (const eventText of events) {
+        processEvent(eventText)
+      }
+    }
+
+    buffer += decoder.decode()
+    if (buffer.trim()) {
+      processEvent(buffer)
+    }
+
+    return ok({
+      id,
+      model,
+      finishReason,
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return fail('请求已取消')
+    }
+    const message = error instanceof Error ? error.message : 'AI请求失败'
+    return fail(message)
   }
 }
-
-export const aiPrompts = {
-  polish: '你是中文写作助手。请在不改变原意的前提下润色文本，使其更专业、更自然。',
-  expand: '你是中文写作助手。请在保留核心观点的前提下扩写文本，补充细节与论据。',
-  summarize: '你是中文写作助手。请提炼文本要点并输出简洁总结。',
-  continue: '你是中文写作助手。请保持原文语气与逻辑，续写后续内容。',
-} as const

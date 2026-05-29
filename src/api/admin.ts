@@ -129,6 +129,9 @@ type ChatMessageRow = {
   created_at: string
 }
 
+const CHAT_TABLE = 'chats'
+const CHAT_MESSAGE_TABLE = 'chat_messages'
+
 type AdminProfileRpcRow = {
   id: string
   email: string | null
@@ -137,10 +140,10 @@ type AdminProfileRpcRow = {
   created_at: string | null
 }
 
-function ok<T>(data: T): AdminApiResult<T> {
+function ok<T>(data?: T): AdminApiResult<T> {
   return {
     success: true,
-    data,
+    data: data ?? null,
     error: null,
   }
 }
@@ -613,6 +616,63 @@ export async function getAdminAnalyticsOverview(
       aiCallTrend: toTrendPoints(payload.aiCallTrend),
       topEvents: toTopEvents(payload.topEvents),
     })
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminDeleteChat(chatId: string): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!chatId) {
+      return fail('chatId 不能为空')
+    }
+
+    // First delete all messages in the chat
+    const { error: messagesError } = await supabase
+      .from(CHAT_MESSAGE_TABLE)
+      .delete()
+      .eq('chat_id', chatId)
+
+    if (messagesError) {
+      return fail(messagesError.message)
+    }
+
+    // Then delete the chat itself
+    const { error: chatError } = await supabase
+      .from(CHAT_TABLE)
+      .delete()
+      .eq('id', chatId)
+
+    if (chatError) {
+      return fail(chatError.message)
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminDeleteChatMessage(messageId: string): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!messageId) {
+      return fail('messageId 不能为空')
+    }
+
+    const { error } = await supabase
+      .from(CHAT_MESSAGE_TABLE)
+      .delete()
+      .eq('id', messageId)
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok()
   } catch (error) {
     return fail(normalizeError(error))
   }

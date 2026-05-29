@@ -46,6 +46,7 @@ type KnowledgeChunkRow = {
   content: string
   token_count: number | null
   meta: Record<string, unknown> | null
+  embedding: number[] | null
   created_at: string
 }
 
@@ -63,10 +64,10 @@ const CHAT_TABLE = 'chats'
 const CHAT_MESSAGE_TABLE = 'chat_messages'
 const KNOWLEDGE_CHUNK_TABLE = 'knowledge_chunks'
 
-function ok<T>(data: T): ApiResult<T> {
+function ok<T>(data?: T): ApiResult<T> {
   return {
     success: true,
-    data,
+    data: data ?? null,
     error: null,
   }
 }
@@ -250,6 +251,7 @@ function toKnowledgeChunk(
     content: row.content,
     tokenCount: row.token_count,
     meta: row.meta,
+    embedding: row.embedding,
     createdAt: row.created_at,
   }
 }
@@ -468,7 +470,7 @@ export async function getKnowledgeChunksForQa(
     const { data, error } = await supabase
       .from(KNOWLEDGE_CHUNK_TABLE)
       .select(
-        'id, knowledge_base_id, file_id, document_id, source_type, chunk_index, content, token_count, meta, created_at',
+        'id, knowledge_base_id, file_id, document_id, source_type, chunk_index, content, token_count, meta, embedding, created_at',
       )
       .eq('owner_id', userId)
       .eq('knowledge_base_id', knowledgeBaseId)
@@ -520,6 +522,68 @@ export async function getKnowledgeChunksForQa(
     const documentTitleMap = new Map((documentsResult.data ?? []).map((item) => [item.id, item.title]))
 
     return ok(rows.map((item) => toKnowledgeChunk(item, fileNameMap, documentTitleMap)))
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function deleteChat(chatId: string): Promise<ApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+    const userId = await requireUserId()
+
+    if (!chatId) {
+      return fail('chatId 不能为空')
+    }
+
+    // First delete all messages in the chat
+    const { error: messagesError } = await supabase
+      .from(CHAT_MESSAGE_TABLE)
+      .delete()
+      .eq('chat_id', chatId)
+      .eq('owner_id', userId)
+
+    if (messagesError) {
+      return fail(messagesError.message)
+    }
+
+    // Then delete the chat itself
+    const { error: chatError } = await supabase
+      .from(CHAT_TABLE)
+      .delete()
+      .eq('id', chatId)
+      .eq('owner_id', userId)
+
+    if (chatError) {
+      return fail(chatError.message)
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function deleteChatMessage(messageId: string): Promise<ApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+    const userId = await requireUserId()
+
+    if (!messageId) {
+      return fail('messageId 不能为空')
+    }
+
+    const { error } = await supabase
+      .from(CHAT_MESSAGE_TABLE)
+      .delete()
+      .eq('id', messageId)
+      .eq('owner_id', userId)
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok()
   } catch (error) {
     return fail(normalizeError(error))
   }

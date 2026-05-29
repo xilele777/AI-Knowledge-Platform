@@ -10,11 +10,11 @@ const cards = computed(() => {
   const value = stats.value
 
   return [
-    { label: '用户数', value: value?.userCount ?? 0 },
-    { label: '文档数', value: value?.documentCount ?? 0 },
-    { label: '文件数', value: value?.fileCount ?? 0 },
-    { label: '会话数', value: value?.chatCount ?? 0 },
-    { label: '消息数', value: value?.messageCount ?? 0 },
+    { label: '用户数', value: value?.userCount ?? 0, color: 'var(--google-blue)' },
+    { label: '文档数', value: value?.documentCount ?? 0, color: 'var(--google-green)' },
+    { label: '文件数', value: value?.fileCount ?? 0, color: 'var(--google-yellow)' },
+    { label: '会话数', value: value?.chatCount ?? 0, color: 'var(--google-red)' },
+    { label: '消息数', value: value?.messageCount ?? 0, color: 'var(--google-purple)' },
   ]
 })
 
@@ -45,7 +45,6 @@ void loadStats()
     <div class="page-header">
       <div>
         <h2 class="page-title">后台首页</h2>
-        <p class="page-subtitle">查看用户、文档、文件和问答基础统计数据。</p>
       </div>
       <el-button :loading="loading" @click="loadStats">刷新</el-button>
     </div>
@@ -67,9 +66,9 @@ void loadStats()
 
       <el-row v-else :gutter="16">
         <el-col v-for="item in cards" :key="item.label" :xs="24" :sm="12" :lg="8">
-          <el-card shadow="hover" class="stat-card">
+          <el-card class="stat-card">
             <div class="stat-label">{{ item.label }}</div>
-            <div class="stat-value">{{ item.value }}</div>
+            <div class="stat-value" :style="{ color: item.color }">{{ item.value }}</div>
           </el-card>
         </el-col>
       </el-row>
@@ -93,12 +92,13 @@ void loadStats()
 .page-title {
   margin: 0;
   font-size: 24px;
-  color: #1f2a37;
+  color: var(--md-sys-color-on-background);
+  font-weight: 400;
 }
 
 .page-subtitle {
   margin: 6px 0 0;
-  color: #6b7280;
+  color: var(--md-sys-color-on-surface-variant);
   font-size: 14px;
 }
 
@@ -111,20 +111,28 @@ void loadStats()
 }
 
 .stat-card {
-  border: 1px solid #e6edf6;
+  border: none;
+  background-color: var(--md-sys-color-surface-container-low);
+  transition: all var(--md-sys-transition-medium) var(--md-sys-motion-easing-standard);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-sys-elevation-level-2);
 }
 
 .stat-label {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .stat-value {
-  margin-top: 10px;
-  font-size: 30px;
+  margin-top: 12px;
+  font-size: 36px;
   line-height: 1;
-  font-weight: 700;
-  color: #111827;
+  font-weight: 600;
+  transition: color var(--md-sys-transition-medium);
 }
 
 :deep(.el-col) {

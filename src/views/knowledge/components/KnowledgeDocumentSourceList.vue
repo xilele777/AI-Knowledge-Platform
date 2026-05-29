@@ -6,6 +6,10 @@ const props = defineProps<{
   items: KnowledgeDocumentSource[]
 }>()
 
+const emit = defineEmits<{
+  (e: 'remove', knowledgeBaseId: string, documentId: string): void
+}>()
+
 function formatDate(dateText: string | null): string {
   if (!dateText) {
     return '-'
@@ -17,6 +21,10 @@ function formatDate(dateText: string | null): string {
   }
 
   return date.toLocaleString('zh-CN')
+}
+
+function handleRemove(knowledgeBaseId: string, documentId: string) {
+  emit('remove', knowledgeBaseId, documentId)
 }
 </script>
 
@@ -44,6 +52,13 @@ function formatDate(dateText: string | null): string {
       <el-table-column label="文档ID" min-width="260">
         <template #default="scope">
           <span class="doc-id">{{ scope.row.documentId }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="100" fixed="right">
+        <template #default="scope">
+          <el-button type="danger" link size="small" @click="handleRemove(scope.row.knowledgeBaseId, scope.row.documentId)">
+            移除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>

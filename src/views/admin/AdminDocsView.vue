@@ -35,7 +35,6 @@ void loadDocs()
     <div class="page-header">
       <div>
         <h2 class="page-title">文档管理</h2>
-        <p class="page-subtitle">展示 documents，并尽量附带作者信息。</p>
       </div>
       <el-button :loading="loading" @click="loadDocs">刷新</el-button>
     </div>
@@ -54,25 +53,23 @@ void loadDocs()
         <el-empty v-if="!loading && rows.length === 0" description="暂无文档数据" />
 
         <el-table v-else :data="rows" border stripe>
-          <el-table-column prop="id" label="文档ID" min-width="220" />
-          <el-table-column prop="title" label="标题" min-width="220" />
-          <el-table-column label="状态" min-width="120">
+          <el-table-column prop="title" label="标题" min-width="240" />
+          <el-table-column label="状态" min-width="100">
             <template #default="scope">
               <el-tag size="small">{{ scope.row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="作者" min-width="180">
+          <el-table-column label="作者" min-width="140">
             <template #default="scope">
               {{ scope.row.authorName || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="作者邮箱" min-width="200">
+          <el-table-column label="作者邮箱" min-width="180">
             <template #default="scope">
               {{ scope.row.authorEmail || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="ownerId" label="owner_id" min-width="220" />
-          <el-table-column label="更新时间" min-width="180">
+          <el-table-column label="更新时间" min-width="160">
             <template #default="scope">
               {{ formatDate(scope.row.updatedAt) }}
             </template>

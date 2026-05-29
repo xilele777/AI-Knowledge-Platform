@@ -4,8 +4,8 @@ export interface MenuItem {
 }
 
 export const mainMenus: MenuItem[] = [
-  { index: '/dashboard', title: '工作台' },
   { index: '/docs', title: '文档' },
+  { index: '/shared', title: '共享广场' },
   { index: '/knowledge', title: '知识库' },
   { index: '/chat', title: '问答' },
   { index: '/profile', title: '个人中心' },

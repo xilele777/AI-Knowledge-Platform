@@ -3,7 +3,8 @@ import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
-import { useAIStream, type AIStreamRequest } from '../../composables/useAIStream'
+import { generateAiTextStream } from '../../api/ai'
+import { useAiConfigStore } from '../../stores/aiConfig'
 import {
   aiAssistantActionOptions,
   getAiAssistantPrompt,
@@ -23,12 +24,12 @@ const emit = defineEmits<{
   (event: 'append-content', value: string): void
 }>()
 
+const aiConfigStore = useAiConfigStore()
+
 const running = ref(false)
 const resultText = ref('')
 const errorMessage = ref('')
-const lastGeneratePayload = ref<AIStreamRequest | null>(null)
-
-const stream = useAIStream()
+const lastGeneratePayload = ref<{ systemPrompt: string; userPrompt: string } | null>(null)
 
 const form = reactive({
   action: 'polish' as AiAssistantAction,
@@ -42,74 +43,52 @@ const requestText = computed(() => {
   if (form.source === 'document') {
     return props.currentContent.trim()
   }
-
   return form.customText.trim()
 })
 
 const showEmptyState = computed(() => !running.value && !errorMessage.value && !resultText.value)
 
-/**
- * 从 AI 回复中分离思考过程和正式输出
- */
-function parseMessageContent(content: string) {
-  let thinking = ''
-  let answer = content
-
-  // 1. 优先查找 <think> 标签包裹的思考过程
-  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
-  if (thinkMatch) {
-    thinking = thinkMatch[1].trim()
-    answer = content.slice(thinkMatch.index! + thinkMatch[0].length).trim()
-  }
-
-  // 2. 查找常见的思考标记
-  const thinkRegex = /^(?:思考|思考过程|thinking|reasoning)[:：]\s*([\s\S]*?)(?=\n\s*(?:回答|输出|answer|output)[:：]|$)/i
-  const thinkMatch2 = content.match(thinkRegex)
-  if (thinkMatch2 && !thinking) {
-    thinking = thinkMatch2[1].trim()
-    answer = content.slice(thinkMatch2.index! + thinkMatch2[0].length).trim()
-  }
-
-  return { thinking, answer }
-}
-
-async function runGenerate(payload: AIStreamRequest) {
+async function runGenerate(systemPrompt: string, userPrompt: string) {
   errorMessage.value = ''
   resultText.value = ''
-  lastGeneratePayload.value = payload
+  lastGeneratePayload.value = { systemPrompt, userPrompt }
   running.value = true
 
   try {
-    await stream.start(payload, {
-      onToken(token) {
-        resultText.value += token
-      },
-      onError(error) {
-        errorMessage.value = error.message || 'AI 生成失败'
-      },
-    })
+    const config = await aiConfigStore.ensureConfig()
 
-    if (!resultText.value.trim()) {
-      errorMessage.value = 'AI 返回内容为空'
+    if (!aiConfigStore.isComplete) {
+      ElMessage.warning('请先在个人中心配置 AI API 信息')
+      return
+    }
+
+    const result = await generateAiTextStream(
+      {
+        systemPrompt,
+        userPrompt,
+        temperature: 0.7,
+      },
+      config,
+      (chunk) => {
+        resultText.value += chunk
+      }
+    )
+
+    if (!result.success) {
+      errorMessage.value = result.error || 'AI 生成失败'
       return
     }
 
     void track(ANALYTICS_EVENTS.AI_WRITING_CALL, {
       action: form.action,
       source: form.source,
-      input_length: requestText.value.length,
+      input_length: userPrompt.length,
       output_length: resultText.value.length,
-      model: '',
+      model: config.model,
       total_tokens: null,
     })
   } catch (error) {
-    if (stream.stoppedByUser.value) {
-      ElMessage.info('已停止生成，保留当前已生成内容')
-      return
-    }
-
-    const message = error instanceof Error ? error.message : 'AI 生成失败'
-    errorMessage.value = message
+    errorMessage.value = error instanceof Error ? error.message : 'AI 生成失败'
   } finally {
     running.value = false
   }
@@ -121,12 +100,7 @@ async function handleGenerate() {
     return
   }
 
-  await runGenerate({
-    scene: 'doc-assistant',
-    systemPrompt: getAiAssistantPrompt(form.action),
-    userPrompt: requestText.value,
-    temperature: 0.7,
-  })
+  await runGenerate(getAiAssistantPrompt(form.action), requestText.value)
 }
 
 async function handleRegenerate() {
@@ -135,18 +109,13 @@ async function handleRegenerate() {
     return
   }
 
-  await runGenerate(lastGeneratePayload.value)
-}
-
-function handleStopGenerate() {
-  stream.stop()
+  await runGenerate(lastGeneratePayload.value.systemPrompt, lastGeneratePayload.value.userPrompt)
 }
 
 function handleReplace() {
   if (!resultText.value) {
     return
   }
-
   emit('replace-content', resultText.value)
 }
 
@@ -154,7 +123,6 @@ function handleAppend() {
   if (!resultText.value) {
     return
   }
-
   emit('append-content', resultText.value)
 }
 
@@ -187,7 +155,9 @@ async function handleCopy() {
             v-for="item in aiAssistantActionOptions"
             :key="item.value"
             :label="item.value"
-          />
+          >
+            {{ item.label }}
+          </el-radio-button>
         </el-radio-group>
         <div class="action-desc">
           {{ aiAssistantActionOptions.find((item) => item.value === form.action)?.description }}
@@ -196,8 +166,8 @@ async function handleCopy() {
 
       <el-form-item label="文本来源">
         <el-radio-group v-model="form.source">
-          <el-radio label="使用当前文档内容" value="document" />
-          <el-radio label="手动输入文本" value="custom" />
+          <el-radio value="document">使用当前文档内容</el-radio>
+          <el-radio value="custom">手动输入文本</el-radio>
         </el-radio-group>
       </el-form-item>
 
@@ -222,14 +192,6 @@ async function handleCopy() {
         />
       </el-form-item>
 
-      <el-alert
-        title="AI 请求通过 Supabase Edge Function 代理，前端不再保存 API Key。"
-        type="info"
-        :closable="false"
-        show-icon
-        class="source-alert"
-      />
-
       <div class="run-actions">
         <el-button type="primary" :loading="running" class="run-btn" @click="handleGenerate">
           生成结果
@@ -237,20 +199,17 @@ async function handleCopy() {
         <el-button :disabled="running || !lastGeneratePayload" @click="handleRegenerate">
           重新生成
         </el-button>
-        <el-button type="danger" plain :disabled="!running" @click="handleStopGenerate">
-          停止生成
-        </el-button>
       </div>
     </el-form>
 
     <div class="result-wrapper">
       <el-alert
         v-if="running"
-        title="生成中，内容将实时追加..."
+        title="生成中..."
         type="success"
         :closable="false"
         show-icon
-        class="streaming-alert"
+        class="loading-alert"
       />
 
       <el-alert
@@ -265,22 +224,10 @@ async function handleCopy() {
 
       <template v-else>
         <div class="result-title">生成结果</div>
-        
-        <div class="result-content">
-          <!-- 思考过程（如果有） -->
-          <div v-if="parseMessageContent(resultText).thinking" class="thinking-block">
-            <div class="thinking-header">
-              <span class="thinking-icon">🧠</span>
-              <span class="thinking-label">思考过程</span>
-            </div>
-            <div class="thinking-content">
-              <MdPreview :model-value="parseMessageContent(resultText).thinking" />
-            </div>
-          </div>
 
-          <!-- 正式输出 -->
+        <div class="result-content">
           <div class="answer-preview">
-            <MdPreview :model-value="parseMessageContent(resultText).answer || resultText" />
+            <MdPreview :model-value="resultText" />
           </div>
         </div>
 
@@ -296,17 +243,15 @@ async function handleCopy() {
 
 <style scoped>
 .assistant-card {
-  border: 1px solid #e3eaf5;
+  border: 1px solid #e6edf6;
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
 .assistant-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: 600;
+  font-weight: bold;
+  font-size: 16px;
 }
 
 .assistant-form {
@@ -332,13 +277,13 @@ async function handleCopy() {
 .run-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 6px;
+  justify-content: flex-start;
   gap: 8px;
+  margin-top: 6px;
 }
 
 .run-btn {
-  flex: 1;
+  flex: 0;
 }
 
 .result-wrapper {
@@ -350,24 +295,9 @@ async function handleCopy() {
   overflow: hidden;
 }
 
-.streaming-alert {
+.loading-alert {
   margin-bottom: 10px;
   flex-shrink: 0;
-}
-
-.error-debug-box {
-  margin-top: 10px;
-  padding: 10px;
-  background: #fff7f7;
-  border: 1px solid #ffd8d8;
-  border-radius: 8px;
-}
-
-.error-debug-title {
-  margin-bottom: 8px;
-  color: #d03050;
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .result-title {
@@ -382,7 +312,6 @@ async function handleCopy() {
   overflow-y: auto;
 }
 
-/* Markdown 预览样式 */
 .answer-preview {
   background: #fff;
   padding: 12px;
@@ -428,45 +357,6 @@ async function handleCopy() {
   background: transparent;
   color: #d4d4d4;
   padding: 0;
-}
-
-/* 思考过程样式 */
-.thinking-block {
-  margin-bottom: 12px;
-  border-left: 4px solid #86909c;
-  background: linear-gradient(90deg, #f2f4f7 0%, #fff 100%);
-  border-radius: 0 8px 8px 0;
-  padding: 10px 14px;
-}
-
-.thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.thinking-icon {
-  font-size: 16px;
-}
-
-.thinking-label {
-  font-size: 13px;
-  color: #6b7280;
-  font-weight: 600;
-}
-
-.thinking-content {
-  font-size: 14px;
-  color: #5a6675;
-}
-
-:deep(.thinking-content .md-preview) {
-  font-size: 14px;
-}
-
-.result-input {
-  margin-bottom: 10px;
 }
 
 .result-actions {
