@@ -146,6 +146,8 @@ export interface BatchCreateKnowledgeChunksInput {
 export interface BatchWriteChunksResult {
   insertedCount: number
   chunkIds: string[]
+  embeddingStatus: 'generated' | 'skipped' | 'failed'
+  embeddingError: string | null
 }
 
 export interface KnowledgeDocumentSource {

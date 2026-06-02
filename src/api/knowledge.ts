@@ -506,6 +506,20 @@ export async function deleteKnowledgeFile(id: string): Promise<ApiResult<boolean
     assertSupabaseConfigured()
     const userId = await requireUserId()
 
+    if (!id) {
+      return fail('fileId 不能为空')
+    }
+
+    const { error: chunksError } = await supabase
+      .from(KNOWLEDGE_CHUNK_TABLE)
+      .delete()
+      .eq('file_id', id)
+      .eq('owner_id', userId)
+
+    if (chunksError) {
+      return fail(chunksError.message)
+    }
+
     const { error } = await supabase
       .from(KNOWLEDGE_FILE_TABLE)
       .delete()
@@ -527,26 +541,42 @@ export async function deleteKnowledgeBase(id: string): Promise<ApiResult<boolean
     assertSupabaseConfigured()
     const userId = await requireUserId()
 
+    if (!id) {
+      return fail('knowledgeBaseId 不能为空')
+    }
+
     // 删除关联的文档切片
-    await supabase
+    const { error: chunksError } = await supabase
       .from(KNOWLEDGE_CHUNK_TABLE)
       .delete()
       .eq('knowledge_base_id', id)
       .eq('owner_id', userId)
 
+    if (chunksError) {
+      return fail(chunksError.message)
+    }
+
     // 删除关联的文件
-    await supabase
+    const { error: filesError } = await supabase
       .from(KNOWLEDGE_FILE_TABLE)
       .delete()
       .eq('knowledge_base_id', id)
       .eq('owner_id', userId)
 
+    if (filesError) {
+      return fail(filesError.message)
+    }
+
     // 删除关联的文档关系
-    await supabase
+    const { error: documentsError } = await supabase
       .from(KNOWLEDGE_DOCUMENT_TABLE)
       .delete()
       .eq('knowledge_base_id', id)
       .eq('owner_id', userId)
+
+    if (documentsError) {
+      return fail(documentsError.message)
+    }
 
     // 删除知识库本身
     const { error } = await supabase
@@ -574,12 +604,16 @@ export async function removeDocumentFromKnowledgeBase(
     const userId = await requireUserId()
 
     // 删除该文档在该知识库中的切片
-    await supabase
+    const { error: chunksError } = await supabase
       .from(KNOWLEDGE_CHUNK_TABLE)
       .delete()
       .eq('knowledge_base_id', knowledgeBaseId)
       .eq('document_id', documentId)
       .eq('owner_id', userId)
+
+    if (chunksError) {
+      return fail(chunksError.message)
+    }
 
     // 删除文档与知识库的关联关系
     const { error } = await supabase
@@ -699,16 +733,25 @@ export async function batchInsertKnowledgeChunks(
     }
 
     let chunksWithEmbeddings = input.chunks
+    let embeddingStatus: BatchWriteChunksResult['embeddingStatus'] = 'skipped'
+    let embeddingError: string | null = null
 
     if (options?.generateEmbeddings && options?.config) {
-      const embeddings = await createBatchEmbeddings(
-        input.chunks.map((chunk) => chunk.content),
-        options.config,
-      )
-      chunksWithEmbeddings = input.chunks.map((chunk, index) => ({
-        ...chunk,
-        embedding: embeddings[index].embedding,
-      }))
+      try {
+        const embeddings = await createBatchEmbeddings(
+          input.chunks.map((chunk) => chunk.content),
+          options.config,
+        )
+        chunksWithEmbeddings = input.chunks.map((chunk, index) => ({
+          ...chunk,
+          embedding: embeddings[index].embedding,
+        }))
+        embeddingStatus = 'generated'
+      } catch (error) {
+        embeddingStatus = 'failed'
+        embeddingError = error instanceof Error ? error.message : 'Embedding 生成失败'
+        console.warn('[knowledge.batchInsertKnowledgeChunks] embedding generation failed:', error)
+      }
     }
 
     const payload = chunksWithEmbeddings.map((chunk) => ({
@@ -739,6 +782,8 @@ export async function batchInsertKnowledgeChunks(
     return ok({
       insertedCount: inserted.length,
       chunkIds: inserted.map((item) => item.id),
+      embeddingStatus,
+      embeddingError,
     })
   } catch (error) {
     return fail(normalizeError(error))

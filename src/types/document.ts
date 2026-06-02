@@ -1,3 +1,5 @@
+import type { AiResolvedConfig } from '../utils/aiConfig'
+
 export type DocumentStatus = 'draft' | 'published' | 'archived'
 
 export interface Document {
@@ -49,6 +51,7 @@ export interface DocumentListQuery {
 export interface AddDocumentToKnowledgeBaseInput {
   documentId: string
   knowledgeBaseId: string
+  aiConfig?: AiResolvedConfig | null
 }
 
 export interface AddDocumentToKnowledgeBaseResult {
@@ -56,6 +59,8 @@ export interface AddDocumentToKnowledgeBaseResult {
   documentId: string
   documentTitle: string
   chunkCount: number
+  embeddingStatus: 'generated' | 'skipped' | 'failed'
+  embeddingError: string | null
 }
 
 export interface ApiResult<T> {

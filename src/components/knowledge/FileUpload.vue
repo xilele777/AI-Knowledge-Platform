@@ -8,6 +8,7 @@ import {
   createKnowledgeFile,
   updateKnowledgeFileStatus,
 } from '../../api/knowledge'
+import { useAiConfigStore } from '../../stores/aiConfig'
 import { chunkText } from '../../utils/chunkText'
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   (e: 'uploaded', payload: UploadSuccessPayload): void
 }>()
 
+const aiConfigStore = useAiConfigStore()
 const fileList = ref<UploadUserFile[]>([])
 const selectedRawFile = ref<UploadRawFile | null>(null)
 const uploading = ref(false)
@@ -89,8 +91,11 @@ async function writeChunksInBatches(
   knowledgeBaseId: string,
   fileId: string,
   chunks: Array<{ index: number; content: string; length: number }>,
-): Promise<void> {
+): Promise<'generated' | 'skipped' | 'failed'> {
   const batchSize = 50
+  const aiConfig = await aiConfigStore.ensureConfig()
+  const canGenerateEmbeddings = aiConfigStore.isComplete
+  let embeddingStatus: 'generated' | 'skipped' | 'failed' = canGenerateEmbeddings ? 'generated' : 'skipped'
 
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize)
@@ -106,12 +111,23 @@ async function writeChunksInBatches(
           length: chunk.length,
         },
       })),
+    }, {
+      generateEmbeddings: canGenerateEmbeddings,
+      config: canGenerateEmbeddings ? aiConfig : undefined,
     })
 
     if (!result.success) {
       throw new Error(result.error || '切片写入失败')
     }
+
+    if (result.data?.embeddingStatus === 'failed') {
+      embeddingStatus = 'failed'
+    } else if (result.data?.embeddingStatus === 'skipped' && embeddingStatus !== 'failed') {
+      embeddingStatus = 'skipped'
+    }
   }
+
+  return embeddingStatus
 }
 
 async function handleUploadAndParse() {
@@ -176,7 +192,7 @@ async function handleUploadAndParse() {
       throw new Error(processingResult.error || '更新 processing 状态失败')
     }
 
-    await writeChunksInBatches(props.knowledgeBaseId, fileId, chunks)
+    const embeddingStatus = await writeChunksInBatches(props.knowledgeBaseId, fileId, chunks)
 
     const doneResult = await updateKnowledgeFileStatus({
       fileId,
@@ -184,6 +200,7 @@ async function handleUploadAndParse() {
       meta: {
         chunkCount: chunks.length,
         parser: 'chunkText',
+        embeddingStatus,
       },
     })
 
@@ -191,7 +208,11 @@ async function handleUploadAndParse() {
       throw new Error(doneResult.error || '更新 done 状态失败')
     }
 
-    ElMessage.success('上传成功，完成切片并入库，共 ' + String(chunks.length) + ' 段')
+    const suffix =
+      embeddingStatus === 'generated'
+        ? '，已生成语义向量'
+        : '，未生成语义向量，将使用关键词检索'
+    ElMessage.success('上传成功，完成切片并入库，共 ' + String(chunks.length) + ' 段' + suffix)
 
     void track(ANALYTICS_EVENTS.FILE_UPLOAD, {
       knowledge_base_id: props.knowledgeBaseId,

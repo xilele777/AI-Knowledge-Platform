@@ -173,7 +173,7 @@ export function extractTextFromCompletionPayload(payload: OpenAiChatCompletionRe
   return extractFirstDeepText(payload)
 }
 
-function extractStreamDeltaText(payload: OpenAiStreamPayload): string {
+export function extractStreamDeltaText(payload: OpenAiStreamPayload): string {
   const choice = payload.choices?.[0]
   if (!choice) {
     return ''
@@ -184,6 +184,15 @@ function extractStreamDeltaText(payload: OpenAiStreamPayload): string {
     extractTextFromUnknownContent(choice.message?.content) ||
     extractTextFromUnknownContent(choice.text)
   )
+}
+
+export function parseSseDataLines(eventText: string): string[] {
+  return eventText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trim())
+    .filter(Boolean)
 }
 
 export async function generateAiText(
@@ -315,37 +324,30 @@ export async function generateAiTextStream(
     let buffer = ''
 
     const processEvent = (eventText: string) => {
-      const dataLines = eventText
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.startsWith('data: '))
-        .map((line) => line.slice('data: '.length))
+      const dataLines = parseSseDataLines(eventText)
 
-      if (dataLines.length === 0) {
-        return
-      }
-
-      const dataText = dataLines.join('\n').trim()
-      if (!dataText || dataText === '[DONE]') {
-        return
-      }
-
-      try {
-        const data = JSON.parse(dataText) as OpenAiStreamPayload
-        id = data.id || id
-        model = data.model || model
-
-        const choice = data.choices?.[0]
-        if (choice?.finish_reason) {
-          finishReason = choice.finish_reason
+      for (const dataText of dataLines) {
+        if (dataText === '[DONE]') {
+          continue
         }
 
-        const content = extractStreamDeltaText(data)
-        if (content) {
-          onChunk(content)
+        try {
+          const data = JSON.parse(dataText) as OpenAiStreamPayload
+          id = data.id || id
+          model = data.model || model
+
+          const choice = data.choices?.[0]
+          if (choice?.finish_reason) {
+            finishReason = choice.finish_reason
+          }
+
+          const content = extractStreamDeltaText(data)
+          if (content) {
+            onChunk(content)
+          }
+        } catch {
+          // 忽略单个 SSE 事件解析错误，继续处理后续事件。
         }
-      } catch {
-        // 忽略单个 SSE 事件解析错误，继续处理后续事件。
       }
     }
 

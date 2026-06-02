@@ -211,12 +211,24 @@ interface PreparedQaRun {
   contextChunks: ChatSourceChunk[]
 }
 
+function hasValuableVectorChunks(chunks: RetrievedChunk<RetrieveChunkInput>[]): boolean {
+  if (chunks.length === 0) {
+    return false
+  }
+
+  const topScore = chunks[0]?.score ?? 0
+  const averageScore = chunks.reduce((total, item) => total + item.score, 0) / chunks.length
+
+  return topScore >= 0.2 && averageScore >= 0.12
+}
+
 async function prepareSmartQa(
   question: string,
   knowledgeBaseId: string | null,
   qaConfig: KnowledgeQaConfig,
 ): Promise<PreparedQaRun> {
   let retrieved: RetrievedChunk<RetrieveChunkInput>[] = []
+  let retrievalStrategy: 'none' | 'vector' | 'keyword' = 'none'
   const shouldRetrieveKnowledge = qaConfig.useKnowledgeEnhanced && Boolean(knowledgeBaseId)
 
   if (shouldRetrieveKnowledge && knowledgeBaseId) {
@@ -256,24 +268,31 @@ async function prepareSmartQa(
           hitCount: 0,
           matchedKeywords: [],
         }))
+        if (retrieved.length > 0) {
+          retrievalStrategy = 'vector'
+        }
       } catch (error) {
         console.warn('[chat.prepareSmartQa] embedding retrieval failed, fallback to keyword retrieval:', error)
       }
     }
 
-    if (retrieved.length === 0) {
+    if (retrievalStrategy !== 'vector' || !hasValuableVectorChunks(retrieved)) {
       retrieved = retrieveRelevantChunks(question, mapChunksToRetrieveInputs(chunks), {
         topK: 5,
         minScore: 0.03,
       })
+      retrievalStrategy = retrieved.length > 0 ? 'keyword' : 'none'
     }
   }
 
-  const hasValuableSources = hasValuableRetrievedChunks(retrieved, {
-    minTopScore: 0.1,
-    minHitCount: 2,
-    minAverageScore: 0.06,
-  })
+  const hasValuableSources =
+    retrievalStrategy === 'vector'
+      ? hasValuableVectorChunks(retrieved)
+      : hasValuableRetrievedChunks(retrieved, {
+          minTopScore: 0.1,
+          minHitCount: 2,
+          minAverageScore: 0.06,
+        })
 
   const useKnowledgeEnhancedMode = shouldRetrieveKnowledge && hasValuableSources
   const mode: ChatAnswerMode = useKnowledgeEnhancedMode ? 'knowledge-enhanced' : 'general-ai'

@@ -9,6 +9,7 @@ export const useAiConfigStore = defineStore('aiConfig', () => {
   const userConfig = ref<UserAiConfig | null>(null)
   const loading = ref(false)
   const initialized = ref(false)
+  let loadingPromise: Promise<void> | null = null
 
   const resolvedConfig = computed<AiResolvedConfig>(() => {
     return resolveAiConfigFromUserConfig(userConfig.value)
@@ -23,19 +24,28 @@ export const useAiConfigStore = defineStore('aiConfig', () => {
   })
 
   async function loadConfig() {
-    if (loading.value) return
-    loading.value = true
-    try {
-      const result = await getUserAiConfig()
-      if (result.success) {
-        userConfig.value = result.data
-      }
-    } catch (error) {
-      console.error('Failed to load AI config:', error)
-    } finally {
-      loading.value = false
-      initialized.value = true
+    if (loadingPromise) {
+      await loadingPromise
+      return
     }
+
+    loading.value = true
+    loadingPromise = (async () => {
+      try {
+        const result = await getUserAiConfig()
+        if (result.success) {
+          userConfig.value = result.data
+        }
+      } catch (error) {
+        console.error('Failed to load AI config:', error)
+      } finally {
+        loading.value = false
+        initialized.value = true
+        loadingPromise = null
+      }
+    })()
+
+    await loadingPromise
   }
 
   async function ensureConfig() {

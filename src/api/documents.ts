@@ -451,10 +451,14 @@ export async function addDocumentToKnowledgeBase(
         },
       })),
     }, {
-      generateEmbeddings: true,
+      generateEmbeddings: Boolean(input.aiConfig),
+      config: input.aiConfig ?? undefined,
     })
 
     let insertedCount = insertResult.data?.insertedCount ?? 0
+    let embeddingStatus: AddDocumentToKnowledgeBaseResult['embeddingStatus'] =
+      insertResult.data?.embeddingStatus ?? (input.aiConfig ? 'failed' : 'skipped')
+    let embeddingError = insertResult.data?.embeddingError ?? null
 
     if (!insertResult.success || !insertResult.data) {
       const errorMessage = insertResult.error || '文档切片入库失败'
@@ -499,7 +503,8 @@ export async function addDocumentToKnowledgeBase(
           },
         })),
       }, {
-        generateEmbeddings: true,
+        generateEmbeddings: Boolean(input.aiConfig),
+        config: input.aiConfig ?? undefined,
       })
 
       if (!retryResult.success || !retryResult.data) {
@@ -507,8 +512,12 @@ export async function addDocumentToKnowledgeBase(
       }
 
       insertedCount = retryResult.data.insertedCount
+      embeddingStatus = retryResult.data.embeddingStatus
+      embeddingError = retryResult.data.embeddingError
     } else {
       insertedCount = insertResult.data.insertedCount
+      embeddingStatus = insertResult.data.embeddingStatus
+      embeddingError = insertResult.data.embeddingError
     }
 
     const { error: updateBridgeError } = await supabase
@@ -531,6 +540,8 @@ export async function addDocumentToKnowledgeBase(
       documentId,
       documentTitle: documentData.title,
       chunkCount: insertedCount,
+      embeddingStatus,
+      embeddingError,
     })
   } catch (error) {
     return fail(normalizeError(error))

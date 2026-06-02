@@ -10,10 +10,55 @@ export interface SimilarChunk<T> {
   similarity: number
 }
 
-export async function createEmbedding(
-  text: string,
+type EmbeddingApiItem = {
+  embedding?: unknown
+  index?: number
+}
+
+type EmbeddingApiResponse = {
+  data?: EmbeddingApiItem[]
+  error?: {
+    message?: string
+  }
+}
+
+function resolveEmbeddingModel(model: string): string {
+  const normalized = model.trim()
+
+  if (normalized.toLowerCase().includes('embedding')) {
+    return normalized
+  }
+
+  return 'text-embedding-3-small'
+}
+
+function isNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'number')
+}
+
+function normalizeEmbeddingResponse(payload: EmbeddingApiResponse, expectedCount: number): EmbeddingResult[] {
+  const items = payload.data ?? []
+
+  if (items.length < expectedCount) {
+    throw new Error('Embedding API 返回数量不足')
+  }
+
+  const sortedItems = [...items].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+  return sortedItems.slice(0, expectedCount).map((item) => {
+    if (!isNumberArray(item.embedding)) {
+      throw new Error('Embedding API 返回格式无效')
+    }
+
+    return {
+      embedding: item.embedding,
+    }
+  })
+}
+
+async function requestEmbeddings(
+  input: string | string[],
   config: AiResolvedConfig,
-): Promise<EmbeddingResult> {
+): Promise<EmbeddingResult[]> {
   const response = await fetch(`${config.baseUrl}/embeddings`, {
     method: 'POST',
     headers: {
@@ -21,32 +66,47 @@ export async function createEmbedding(
       'Authorization': `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
-      input: text,
-      model: config.model,
+      input,
+      model: resolveEmbeddingModel(config.model),
     }),
   })
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Embedding API error: ${response.status} ${errorText}`)
+  let payload: EmbeddingApiResponse | null = null
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
   }
 
-  const data = await response.json()
-  return {
-    embedding: data.data[0].embedding,
+  if (!response.ok) {
+    const errorMessage = payload?.error?.message || `Embedding API error: ${response.status}`
+    throw new Error(errorMessage)
   }
+
+  if (!payload) {
+    throw new Error('Embedding API 响应解析失败')
+  }
+
+  return normalizeEmbeddingResponse(payload, Array.isArray(input) ? input.length : 1)
+}
+
+export async function createEmbedding(
+  text: string,
+  config: AiResolvedConfig,
+): Promise<EmbeddingResult> {
+  const results = await requestEmbeddings(text, config)
+  return results[0]
 }
 
 export async function createBatchEmbeddings(
   texts: string[],
   config: AiResolvedConfig,
 ): Promise<EmbeddingResult[]> {
-  const results: EmbeddingResult[] = []
-  for (const text of texts) {
-    const result = await createEmbedding(text, config)
-    results.push(result)
+  if (texts.length === 0) {
+    return []
   }
-  return results
+
+  return requestEmbeddings(texts, config)
 }
 
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {

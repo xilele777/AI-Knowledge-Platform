@@ -15,12 +15,14 @@ import AIAssistantPanel from '../../components/document/AIAssistantPanel.vue'
 import { clearDocumentDraft, readDocumentDraft, writeDocumentDraft } from '../../utils/documentDraft'
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
+import { useAiConfigStore } from '../../stores/aiConfig'
 import type { KnowledgeBaseListItem } from '../../types/knowledge'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 const route = useRoute()
 const router = useRouter()
+const aiConfigStore = useAiConfigStore()
 const docId = computed(() => String(route.params.id || ''))
 
 const pageLoading = ref(false)
@@ -318,9 +320,11 @@ async function handleJoinKnowledgeBase() {
   joining.value = true
 
   try {
+    const aiConfig = await aiConfigStore.ensureConfig()
     const result = await addDocumentToKnowledgeBase({
       documentId: docId.value,
       knowledgeBaseId: selectedKnowledgeBaseId.value,
+      aiConfig: aiConfigStore.isComplete ? aiConfig : null,
     })
 
     if (!result.success || !result.data) {
@@ -329,7 +333,11 @@ async function handleJoinKnowledgeBase() {
     }
 
     joinDialogVisible.value = false
-    ElMessage.success('加入成功，已写入 ' + String(result.data.chunkCount) + ' 个文档切片')
+    const suffix =
+      result.data.embeddingStatus === 'generated'
+        ? '，已生成语义向量'
+        : '，未生成语义向量，将使用关键词检索'
+    ElMessage.success('加入成功，已写入 ' + String(result.data.chunkCount) + ' 个文档切片' + suffix)
   } finally {
     joining.value = false
   }
