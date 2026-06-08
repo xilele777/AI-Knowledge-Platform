@@ -147,9 +147,10 @@ onMounted(() => {
       <div class="hint">
         <p><strong>提示:</strong></p>
         <ul>
-          <li>您需要配置自己的API Key才能使用AI功能</li>
-          <li>配置会安全地存储在服务器上,仅您可见</li>
-          <li>API Base URL默认使用OpenAI,也可配置兼容的第三方服务</li>
+          <li><strong>必须配置</strong>您自己的 API Key 才能使用 AI 问答、写作助手和知识库功能</li>
+          <li>API Key 加密存储于服务端数据库中，仅您本人可见和使用</li>
+          <li>支持任何 OpenAI 兼容接口（如 OpenAI、MiniMax、DeepSeek 等）</li>
+          <li>如未配置，AI 功能将返回错误提示</li>
         </ul>
       </div>
     </el-card>

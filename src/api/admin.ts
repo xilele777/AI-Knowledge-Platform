@@ -1,4 +1,5 @@
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
+import { invokeEdgeFunction } from '../utils/serverProxy'
 
 export interface AdminApiResult<T> {
   success: boolean
@@ -590,6 +591,31 @@ export async function getAdminAnalyticsOverview(
     assertSupabaseConfigured()
 
     const normalizedDays = Math.max(1, Math.min(30, Math.floor(days || 7)))
+
+    try {
+      const edgePayload = await invokeEdgeFunction<Record<string, unknown>>('admin-analytics', {
+        days: normalizedDays,
+      })
+      const payload = edgePayload || {}
+
+      return ok({
+        userCount: toNumber(payload.userCount),
+        documentCount: toNumber(payload.documentCount),
+        knowledgeFileCount: toNumber(payload.knowledgeFileCount),
+        aiCallCount: toNumber(payload.aiCallCount),
+        login7dTotal: toNumber(payload.login7dTotal),
+        aiCall7dTotal: toNumber(payload.aiCall7dTotal),
+        activeUser7d: toNumber(payload.activeUser7d),
+        documentCreated7d: toNumber(payload.documentCreated7d),
+        fileCreated7d: toNumber(payload.fileCreated7d),
+        avgAiCallsPerDay: toNumber(payload.avgAiCallsPerDay),
+        loginTrend: toTrendPoints(payload.loginTrend),
+        aiCallTrend: toTrendPoints(payload.aiCallTrend),
+        topEvents: toTopEvents(payload.topEvents),
+      })
+    } catch (error) {
+      console.warn('[getAdminAnalyticsOverview] server proxy failed, fallback to RPC:', error)
+    }
 
     const { data, error } = await supabase.rpc('admin_get_analytics_overview', {
       p_days: normalizedDays,

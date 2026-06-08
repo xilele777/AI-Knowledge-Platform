@@ -1,4 +1,5 @@
 import type { AiResolvedConfig } from './aiConfig'
+import { invokeEdgeFunction } from './serverProxy'
 
 export interface EmbeddingResult {
   embedding: number[]
@@ -20,16 +21,6 @@ type EmbeddingApiResponse = {
   error?: {
     message?: string
   }
-}
-
-function resolveEmbeddingModel(model: string): string {
-  const normalized = model.trim()
-
-  if (normalized.toLowerCase().includes('embedding')) {
-    return normalized
-  }
-
-  return 'text-embedding-3-small'
 }
 
 function isNumberArray(value: unknown): value is number[] {
@@ -57,36 +48,11 @@ function normalizeEmbeddingResponse(payload: EmbeddingApiResponse, expectedCount
 
 async function requestEmbeddings(
   input: string | string[],
-  config: AiResolvedConfig,
+  _config: AiResolvedConfig,
 ): Promise<EmbeddingResult[]> {
-  const response = await fetch(`${config.baseUrl}/embeddings`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      input,
-      model: resolveEmbeddingModel(config.model),
-    }),
+  const payload = await invokeEdgeFunction<EmbeddingApiResponse>('ai-embeddings', {
+    input,
   })
-
-  let payload: EmbeddingApiResponse | null = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) {
-    const errorMessage = payload?.error?.message || `Embedding API error: ${response.status}`
-    throw new Error(errorMessage)
-  }
-
-  if (!payload) {
-    throw new Error('Embedding API 响应解析失败')
-  }
-
   return normalizeEmbeddingResponse(payload, Array.isArray(input) ? input.length : 1)
 }
 
