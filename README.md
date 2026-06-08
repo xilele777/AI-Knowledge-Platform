@@ -1,5 +1,210 @@
-# Vue 3 + TypeScript + Vite
+## 1. 项目文件结构
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+```
+src/
+├── main.ts                          # 应用入口，初始化 Pinia / Router / ElementPlus
+├── App.vue                          # 根组件（仅 <router-view />）
+├── style.css                        # 全局样式
+├── vite-env.d.ts                    # Vite 环境类型声明
+│
+├── api/                             # API 层（Supabase 直连 + AI 调用）
+│   ├── auth.ts                      # 认证：注册 / 登录 / 登出 / Session 监听
+│   ├── ai.ts                        # AI 文本生成（普通 + SSE 流式）
+│   ├── chat.ts                      # 对话：会话 CRUD、消息读写、知识库切片检索
+│   ├── documents.ts                 # 文档：CRUD + 同步到知识库（切片入库）
+│   ├── knowledge.ts                 # 知识库：库/文件/切片 CRUD、向量生成
+│   ├── admin.ts                     # 管理后台：用户/文档/文件/聊天/统计
+│   └── userAiConfig.ts             # 用户个人 AI 配置（apiKey / baseUrl / model）
+│
+├── types/                           # TypeScript 类型定义
+│   ├── ai.ts                        # AI 参数 / 结果 / 用户配置
+│   ├── chat.ts                      # 聊天会话 / 消息 / 来源切片 / 问答模式
+│   ├── document.ts                  # 文档状态 / 字段 / 创建更新输入
+│   ├── knowledge.ts                 # 知识库 / 文件 / 切片 / QA 配置
+│   └── router.d.ts                  # 路由元信息类型扩展
+│
+├── stores/                          # Pinia 状态管理
+│   ├── index.ts                     # Pinia 实例
+│   ├── user.ts                      # 用户状态（登录 / 角色 / Auth 监听）
+│   └── aiConfig.ts                  # AI 配置状态（解析 / 完整性检查）
+│
+├── router/
+│   ├── index.ts                     # 路由定义 + beforeEach 守卫（鉴权 / 管理员）
+│   └── menus.ts                     # 侧边栏菜单配置（主菜单 + 管理菜单）
+│
+├── layouts/
+│   ├── MainLayout.vue               # 主布局（普通用户侧边栏 + 内容区）
+│   └── AdminLayout.vue              # 管理后台布局
+│
+├── views/                           # 页面视图
+│   ├── DashboardView.vue            # 仪表盘（当前重定向到 /docs）
+│   ├── ProfileView.vue              # 个人中心
+│   ├── login/LoginView.vue          # 登录页
+│   ├── register/RegisterView.vue    # 注册页
+│   ├── docs/
+│   │   ├── DocsListView.vue         # 文档列表
+│   │   ├── DocEditorView.vue        # 文档编辑器
+│   │   └── components/
+│   │       └── DocumentCard.vue     # 文档卡片
+│   ├── knowledge/
+│   │   ├── KnowledgeListView.vue    # 知识库列表
+│   │   ├── KnowledgeDetailView.vue  # 知识库详情（文件/切片/配置）
+│   │   └── components/
+│   │       ├── KnowledgeCard.vue          # 知识库卡片
+│   │       ├── KnowledgeFileList.vue      # 文件列表
+│   │       └── KnowledgeDocumentSourceList.vue  # 文档来源列表
+│   ├── chat/
+│   │   ├── ChatView.vue             # 问答对话页
+│   │   └── components/
+│   │       ├── ChatInput.vue        # 输入框
+│   │       ├── ChatMessageList.vue  # 消息列表
+│   │       └── SourceChunks.vue     # 引用来源展示
+│   ├── shared/
+│   │   ├── SharedListView.vue       # 共享广场列表
+│   │   ├── SharedDetailView.vue     # 共享文档详情
+│   │   └── components/
+│   │       └── SharedDocumentCard.vue
+│   └── admin/
+│       ├── AdminHomeView.vue        # 管理首页（统计概览）
+│       ├── AdminUsersView.vue       # 用户管理
+│       ├── AdminDocsView.vue        # 文档管理
+│       ├── AdminFilesView.vue       # 文件管理
+│       ├── AdminChatsView.vue       # 问答管理
+│       └── AdminAnalyticsView.vue   # 统计分析（ECharts）
+│
+├── components/                      # 跨页面公共组件
+│   ├── document/
+│   │   └── AIAssistantPanel.vue     # AI 写作助手面板（润色/扩写/总结/续写）
+│   └── knowledge/
+│       └── FileUpload.vue          # 文件上传组件
+│
+├── composables/                     # （目录已创建，尚未使用）
+│
+├── utils/                           # 工具函数
+│   ├── supabase.ts                  # Supabase 客户端初始化 + 配置检查
+│   ├── aiConfig.ts                  # AI 配置解析（默认值 / 缺失字段检测）
+│   ├── vectorEmbedding.ts           # 向量 Embedding + 余弦相似度 + TopK 检索
+│   ├── chunkText.ts                 # 文本切片（段落→句子→硬切分→合并）
+│   ├── retrieveChunks.ts            # 关键词检索（中文 Ngram + 停用词 + 评分）
+│   ├── buildQaPrompt.ts            # 问答 Prompt 构建（知识增强 / 通用 AI）
+│   ├── aiAssistantPrompts.ts       # AI 写作助手动作/Prompt 定义
+│   ├── documentDraft.ts            # 文档草稿本地暂存（localStorage）
+│   └── tracker.ts                  # 埋点工具（写入 analytics_events 表）
+│
+├── constants/
+│   └── analyticsEvents.ts          # 埋点事件名常量
+│
+├── styles/
+│   ├── theme.css                   # 全局主题变量
+│   └── element-plus-overrides.css  # Element Plus 样式覆盖
+│
+└── assets/                         # 静态资源
+    ├── hero.png
+    ├── vite.svg
+    └── vue.svg
+```
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+**Supabase 后端（`supabase/`）：**
+- `config.toml` — Supabase 本地配置
+- `sql/` — 12 个迁移脚本，涵盖知识库、聊天、分析、文档共享、用户 AI 配置等
+
+---
+
+## 2. 模块功能总结
+
+| 模块 | 目录/文件 | 功能 |
+|---|---|---|
+| **认证** | `api/auth.ts` + `stores/user.ts` | Supabase Auth 邮箱注册/登录/登出；Auth 状态监听；角色判断（user/admin） |
+| **文档管理** | `api/documents.ts` + `views/docs/` | 文档 CRUD；Markdown 编辑；草稿本地暂存；文档同步入知识库 |
+| **知识库** | `api/knowledge.ts` + `views/knowledge/` | 知识库/文件/切片全生命周期；文件上传；QA 配置；向量 Embedding 生成 |
+| **AI 问答** | `api/ai.ts` + `api/chat.ts` + `views/chat/` | 三种回答模式（通用AI / 知识增强 / 严格知识）；SSE 流式输出；来源切片引用 |
+| **检索引擎** | `utils/retrieveChunks.ts` + `utils/vectorEmbedding.ts` | 双检索策略：关键词（中文 Ngram）+ 向量余弦相似度 TopK |
+| **AI 写作助手** | `components/document/AIAssistantPanel.vue` + `utils/aiAssistantPrompts.ts` | 文档编辑器侧栏：润色/扩写/总结/续写 |
+| **用户 AI 配置** | `api/userAiConfig.ts` + `stores/aiConfig.ts` | 每个用户自定义 AI API Key / Base URL / Model |
+| **共享广场** | `views/shared/` | 文档 is_shared 标记 → 公开浏览 |
+| **管理后台** | `api/admin.ts` + `views/admin/` | 用户/文档/文件/聊天管理；统计面板（ECharts）；Supabase RPC |
+| **埋点** | `utils/tracker.ts` + `constants/analyticsEvents.ts` | 9 种事件写入 analytics_events 表 |
+| **路由守卫** | `router/index.ts` | beforeEach 鉴权 + 管理员权限拦截 |
+| **样式** | `styles/` | CSS 变量主题 + Element Plus 覆盖 |
+
+---
+
+## 3. 整体运行流程
+
+```
+用户打开页面
+  │
+  ▼
+main.ts bootstrap()
+  ├─ createApp(App)
+  ├─ app.use(pinia)
+  ├─ useUserStore().initialize()        ← 恢复 Session / 绑定 Auth 监听
+  ├─ app.use(router)
+  ├─ app.use(ElementPlus)
+  └─ app.mount('#app')
+          │
+          ▼
+  router.beforeEach 守卫
+  ├─ 未登录 → 重定向 /login
+  ├─ 已登录访问 public 页 → 重定向 /docs
+  └─ 非管理员访问 /admin → 重定向 /docs
+          │
+          ▼
+  ┌─────────────────────────────────────────────────┐
+  │                    主功能区                       │
+  ├──────────┬──────────┬──────────┬────────────────┤
+  │  文档     │  知识库   │  问答     │  共享广场      │
+  │  /docs   │ /knowledge│ /chat    │  /shared       │
+  └──────────┴──────────┴──────────┴────────────────┘
+          │
+  ┌───────┴────────────────────────────────────────┐
+  │  文档 → 编辑器 → AI 写作助手（润色/扩写/总结/续写）│
+  │  文档 → 同步到知识库 → chunkText() 切片           │
+  │  → batchInsertKnowledgeChunks() + Embedding     │
+  ├─────────────────────────────────────────────────┤
+  │  知识库 → 上传文件 / 关联文档 → 切片入库            │
+  │  → 配置 QA（Prompt / 模式 / 自定义 AI）           │
+  ├─────────────────────────────────────────────────┤
+  │  问答 → 用户输入问题                              │
+  │  → retrieveRelevantChunks() 关键词检索            │
+  │  → (可选) vectorEmbedding 向量检索                │
+  │  → buildQaPrompt() 构建 Prompt                   │
+  │  → generateAiTextStream() SSE 流式生成回答        │
+  │  → 保存消息（含 sources / answerMode / status）    │
+  │  → 前端实时渲染流式文本 + SourceChunks 展示引用    │
+  ├─────────────────────────────────────────────────┤
+  │  共享广场 → 浏览 is_shared=true 的文档            │
+  │  管理后台 → /admin (需 admin 角色)               │
+  │  → 用户/文档/文件/聊天管理 + 统计分析(ECharts)     │
+  └─────────────────────────────────────────────────┘
+```
+
+**问答核心流程（最复杂）：**
+1. 用户选择/创建聊天会话（可关联知识库）
+2. 发送问题 → `getKnowledgeChunksForQa()` 拉取知识库全部切片
+3. `retrieveRelevantChunks()` 关键词匹配评分（中英文分词 + Ngram + 停用词过滤）
+4. 根据回答模式：
+   - `general-ai` → `buildGeneralAiPrompt()` 无知识注入，纯 AI 回答
+   - `knowledge-enhanced` → `buildKnowledgeEnhancedPrompt()` 知识+AI 混合
+   - `strict-knowledge` → 仅使用检索到的切片回答
+5. `generateAiTextStream()` 向 OpenAI 兼容端点发 SSE 请求，逐 chunk 回调渲染
+6. 流结束后保存完整消息 + sources 到 Supabase
+
+---
+
+## 4. 易忽略的关键技术点
+
+| # | 技术点 | 位置 | 说明 |
+|---|---|---|---|
+| 1 | **AI 配置两层解析** | `stores/aiConfig.ts` → `utils/aiConfig.ts` | 用户配置 → `resolveAiConfigFromUserConfig()` 解析出 `AiResolvedConfig`（含默认值兜底），调用 AI 前必须通过 `isAiConfigComplete()` 检查，否则静默失败 |
+| 2 | **双检索策略** | `utils/retrieveChunks.ts` + `utils/vectorEmbedding.ts` | 当前 **聊天流程只用关键词检索**（`retrieveRelevantChunks`），向量检索（`findTopSimilarChunks`）已实现但未在聊天流程中串联；Embedding 生成是逐条串行调用 |
+| 3 | **文档→知识库同步** | `api/documents.ts` → `addDocumentToKnowledgeBase()` | 文档内容经 `chunkText()` 切片后批量插入 `knowledge_chunks`；若数据库 `file_id` not-null 约束报错，会自动创建合成的 `.md` 文件记录做兼容 |
+| 4 | **SSE 流式解析** | `api/ai.ts` → `generateAiTextStream()` | 手动解析 `text/event-stream`，用 `\n\n` 分割事件块、缓冲区拼 остаток，兼容不同 OpenAI 兼容端点的响应嵌套格式（`content` 可能是 string 或 array） |
+| 5 | **Auth 状态监听** | `stores/user.ts` → `bindAuthListener()` | `onAuthStateChange` 只绑定一次（`authSubscriptionBound` 防重），但 `initialize()` 在 `main.ts` 和 `router.beforeEach` 中都会被调用，依赖 `initialized` 标志防重入 |
+| 6 | **角色判断多重来源** | `stores/user.ts` → `resolveRole()` | `role` 从 `app_metadata.role` / `user_metadata.role` / `is_admin` 三处取值，任一为 admin 即判定管理员，Supabase 端需配合设置 |
+| 7 | **文档草稿本地暂存** | `utils/documentDraft.ts` | 编辑中的文档通过 `localStorage` 自动暂存，键为 `doc_draft_v1:{id}`；保存成功后需手动 `clearDocumentDraft()`，当前逻辑中未看到清除调用 |
+| 8 | **埋点静默失败** | `utils/tracker.ts` | 埋点写入失败仅 `console.warn`，不影响业务；未登录用户直接跳过，不报错 |
+| 9 | **chat_messages 列兼容降级** | `api/chat.ts` → `createChatMessage()` | 插入消息时若 `sources` / `answer_mode` / `status` / `error_message` 列不存在，自动降级为只写基础字段（适配旧数据库迁移未执行的情况） |
+| 10 | **Vite 代理配置** | `vite.config.ts` | `/api/llm` 代理到 `api.scnet.cn`，但当前 AI 调用直接用用户配置的 `baseUrl`，此代理仅用于特定场景 |
+| 11 | **composables 目录空** | `src/composables/` | 已创建但未使用；`stores/user.ts` 用的是 Options API 风格，`stores/aiConfig.ts` 用的是 Composition API 风格，风格不统一 |
+| 12 | **Supabase 无 Edge Functions** | `supabase/functions/` | 目录为空，所有业务逻辑在前端 + SQL RPC 中，没有服务端函数；API Key 在前端暴露（通过 Supabase RLS 保护） |
