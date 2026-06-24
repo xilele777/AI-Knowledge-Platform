@@ -1,6 +1,5 @@
 import { getCurrentUser } from './auth'
 import { batchInsertKnowledgeChunks } from './knowledge'
-import { createKnowledgeFile } from './knowledge'
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
 import type {
   AddDocumentToKnowledgeBaseInput,
@@ -63,13 +62,6 @@ function normalizeError(error: unknown): string {
   }
 
   return '请求失败，请稍后重试'
-}
-
-function isFileIdNotNullError(message: string): boolean {
-  return (
-    message.includes('file_id') &&
-    (message.includes('not-null') || message.includes('not null') || message.includes('null value'))
-  )
 }
 
 function toDocument(row: DocumentRow): Document {
@@ -461,64 +453,12 @@ export async function addDocumentToKnowledgeBase(
     let embeddingError = insertResult.data?.embeddingError ?? null
 
     if (!insertResult.success || !insertResult.data) {
-      const errorMessage = insertResult.error || '文档切片入库失败'
-
-      if (!isFileIdNotNullError(errorMessage)) {
-        return fail(errorMessage)
-      }
-
-      const fallbackFile = await createKnowledgeFile({
-        knowledgeBaseId,
-        fileName: `${documentData.title}.md`,
-        filePath: null,
-        fileSize: null,
-        mimeType: 'text/markdown',
-        status: 'done',
-        meta: {
-          sourceType: 'document',
-          documentId,
-          documentTitle: documentData.title,
-          synthetic: true,
-        },
-      })
-
-      if (!fallbackFile.success || !fallbackFile.data) {
-        return fail(fallbackFile.error || '创建文档兼容文件记录失败')
-      }
-
-      const retryResult = await batchInsertKnowledgeChunks({
-        knowledgeBaseId,
-        fileId: fallbackFile.data.id,
-        documentId,
-        sourceType: 'document',
-        chunks: chunks.map((item) => ({
-          chunkIndex: item.index,
-          content: item.content,
-          tokenCount: item.length,
-          meta: {
-            sourceType: 'document',
-            documentId,
-            documentTitle: documentData.title,
-            syntheticFileId: fallbackFile.data?.id,
-          },
-        })),
-      }, {
-        generateEmbeddings: Boolean(input.aiConfig),
-        config: input.aiConfig ?? undefined,
-      })
-
-      if (!retryResult.success || !retryResult.data) {
-        return fail(retryResult.error || '文档切片入库失败')
-      }
-
-      insertedCount = retryResult.data.insertedCount
-      embeddingStatus = retryResult.data.embeddingStatus
-      embeddingError = retryResult.data.embeddingError
-    } else {
-      insertedCount = insertResult.data.insertedCount
-      embeddingStatus = insertResult.data.embeddingStatus
-      embeddingError = insertResult.data.embeddingError
+      return fail(insertResult.error || '文档切片入库失败')
     }
+
+    insertedCount = insertResult.data.insertedCount
+    embeddingStatus = insertResult.data.embeddingStatus
+    embeddingError = insertResult.data.embeddingError
 
     const { error: updateBridgeError } = await supabase
       .from(KNOWLEDGE_DOCUMENT_TABLE)
