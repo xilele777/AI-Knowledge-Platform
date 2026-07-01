@@ -64,14 +64,34 @@ const handleOpen = () => {
 
 <style scoped>
 .shared-doc-card {
-  border: 1px solid #e6edf6;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.shared-doc-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--md-sys-color-primary);
+  opacity: 0;
+  transition: opacity var(--md-sys-transition-medium) ease;
+  border-radius: 0 2px 2px 0;
 }
 
 .shared-doc-card:hover {
   transform: translateY(-2px);
-  border-color: #409eff;
+  box-shadow: var(--md-sys-elevation-level-2);
+  border-color: var(--md-sys-color-outline);
+}
+
+.shared-doc-card:hover::before {
+  opacity: 1;
 }
 
 .doc-header {
@@ -84,16 +104,17 @@ const handleOpen = () => {
 
 .doc-title {
   margin: 0;
-  font-size: 16px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-title-medium);
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .doc-meta {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -102,9 +123,9 @@ const handleOpen = () => {
 .shared-time {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid #e6edf6;
-  color: #909399;
-  font-size: 12px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-outline);
+  font-size: var(--md-sys-typescale-label-medium);
 }
 
 .view-hint {

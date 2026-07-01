@@ -180,7 +180,7 @@ onMounted(() => {
 .hint {
   margin-top: 20px;
   padding: 16px;
-  background-color: #f5f7fa;
+  background-color: var(--md-sys-color-surface-container-low);
   border-radius: 8px;
 }
 

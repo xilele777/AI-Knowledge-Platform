@@ -783,7 +783,7 @@ onMounted(() => {
           </el-select>
         </div>
 
-        <div class="chat-list">
+        <div class="chat-list" v-loading="loadingChats">
           <div v-if="!hasChats && !loadingChats" class="empty-chats">
             暂无历史对话
           </div>
@@ -800,7 +800,6 @@ onMounted(() => {
               <div class="chat-date">{{ formatDate(chat.updatedAt) }}</div>
             </div>
             <el-button
-              type="danger"
               size="small"
               circle
               @click="handleDeleteChat(chat.id, $event)"
@@ -901,14 +900,14 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f3f4f6;
+  background: var(--md-sys-color-surface-container);
 }
 
 .error-banner {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-error);
   padding: 12px 24px;
-  font-size: 14px;
+  font-size: var(--md-sys-typescale-body-medium);
   text-align: center;
 }
 
@@ -921,8 +920,8 @@ onMounted(() => {
 
 .sidebar {
   width: 280px;
-  background: #ffffff;
-  border-right: 1px solid #e5e7eb;
+  background: var(--md-sys-color-surface-container-lowest);
+  border-right: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -930,7 +929,7 @@ onMounted(() => {
 
 .sidebar-header {
   padding: 20px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -938,9 +937,9 @@ onMounted(() => {
 }
 
 .sidebar-title {
-  font-size: 18px;
+  font-size: var(--md-sys-typescale-title-large);
   font-weight: 700;
-  color: #111827;
+  color: var(--md-sys-color-on-surface);
   margin: 0;
 }
 
@@ -950,7 +949,7 @@ onMounted(() => {
 
 .kb-selector {
   padding: 16px 20px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .kb-select {
@@ -968,8 +967,8 @@ onMounted(() => {
 
 .empty-chats {
   text-align: center;
-  color: #9ca3af;
-  font-size: 14px;
+  color: var(--md-sys-color-outline);
+  font-size: var(--md-sys-typescale-body-medium);
   padding: 24px 12px;
 }
 
@@ -984,11 +983,11 @@ onMounted(() => {
 }
 
 .chat-item:hover {
-  background: #f3f4f6;
+  background: var(--md-sys-color-surface-container);
 }
 
 .chat-item.active {
-  background: #eff6ff;
+  background: var(--md-sys-color-primary-container);
 }
 
 .chat-item-content {
@@ -997,9 +996,9 @@ onMounted(() => {
 }
 
 .chat-title {
-  font-size: 14px;
+  font-size: var(--md-sys-typescale-body-medium);
   font-weight: 500;
-  color: #374151;
+  color: var(--md-sys-color-on-surface);
   line-height: 1.4;
   margin-bottom: 4px;
   overflow: hidden;
@@ -1008,19 +1007,30 @@ onMounted(() => {
 }
 
 .chat-item.active .chat-title {
-  color: #1d4ed8;
+  color: var(--md-sys-color-primary);
   font-weight: 600;
 }
 
 .chat-date {
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .delete-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  color: var(--md-sys-color-on-surface-variant);
+  background: transparent;
+  border: none;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.delete-btn:hover {
+  color: var(--md-sys-color-error);
+  background: var(--md-sys-color-error-container);
 }
 
 .chat-item:hover .delete-btn {
@@ -1032,17 +1042,17 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: #ffffff;
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .chat-header {
   padding: 16px 24px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: #fafafa;
+  background: var(--md-sys-color-surface-container-low);
 }
 
 .header-left {
@@ -1051,15 +1061,15 @@ onMounted(() => {
 }
 
 .header-title {
-  font-size: 16px;
+  font-size: var(--md-sys-typescale-title-medium);
   font-weight: 600;
-  color: #111827;
+  color: var(--md-sys-color-on-surface);
   margin: 0 0 4px 0;
 }
 
 .header-subtitle {
-  font-size: 13px;
-  color: #6b7280;
+  font-size: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1074,13 +1084,13 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--md-sys-color-surface-container-low);
 }
 
 .input-container {
   flex-shrink: 0;
-  border-top: 1px solid #e5e7eb;
-  background: #ffffff;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .qa-config-form {
@@ -1103,12 +1113,12 @@ onMounted(() => {
 }
 
 .chat-list::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--md-sys-color-outline-variant);
   border-radius: 3px;
 }
 
 .chat-list::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: var(--md-sys-color-outline);
 }
 
 @media (max-width: 900px) {

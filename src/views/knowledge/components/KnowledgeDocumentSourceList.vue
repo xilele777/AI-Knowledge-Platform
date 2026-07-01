@@ -67,8 +67,8 @@ function handleRemove(knowledgeBaseId: string, documentId: string) {
 
 <style scoped>
 .doc-id {
-  color: #606266;
+  color: var(--md-sys-color-on-surface-variant);
   font-family: Consolas, 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--md-sys-typescale-label-medium);
 }
 </style>

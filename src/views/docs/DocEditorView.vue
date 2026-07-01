@@ -39,6 +39,7 @@ const knowledgeBases = ref<KnowledgeBaseListItem[]>([])
 const selectedKnowledgeBaseId = ref('')
 const isShared = ref(false)
 const sharing = ref(false)
+const showAssistant = ref(false)
 
 const form = reactive({
   title: '',
@@ -375,7 +376,8 @@ void loadDocument()
         </el-button>
         <el-tag v-if="isShared" type="success" size="small">共享中</el-tag>
         <el-tag :type="saveStatusType" size="small">{{ saveStatusText }}</el-tag>
-        <el-button type="danger" plain :loading="deleting" @click="handleDelete">删除</el-button>
+        <el-button @click="showAssistant = true">AI 助手</el-button>
+        <el-button type="danger" text :loading="deleting" @click="handleDelete">删除</el-button>
       </div>
     </div>
 
@@ -395,14 +397,23 @@ void loadDocument()
           </el-form-item>
         </el-form>
       </el-card>
+    </div>
 
+    <!-- AI 助手抽屉 -->
+    <el-drawer
+      v-model="showAssistant"
+      title="AI 写作助手"
+      direction="rtl"
+      size="420px"
+      :destroy-on-close="false"
+      class="ai-assistant-drawer"
+    >
       <AIAssistantPanel
-        class="assistant-panel"
         :current-content="form.content"
         @replace-content="handleReplaceContent"
         @append-content="handleAppendContent"
       />
-    </div>
+    </el-drawer>
 
     <el-dialog v-model="joinDialogVisible" title="加入知识库" width="520px" :close-on-click-modal="false">
       <el-form label-position="top" v-loading="knowledgeLoading">
@@ -427,6 +438,15 @@ void loadDocument()
     </el-dialog>
   </div>
 </template>
+
+<style>
+/* el-drawer body 打通 flex 高度链（drawer 由 teleport 挂载，需非 scoped） */
+.ai-assistant-drawer .el-drawer__body {
+  display: flex !important;
+  flex-direction: column;
+  padding: 0;
+}
+</style>
 
 <style scoped>
 .editor-page {
@@ -458,30 +478,57 @@ void loadDocument()
 }
 
 .editor-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 12px;
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .editor-card {
-  border: 1px solid #e6edf6;
+  border: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  flex: 1;
+  min-height: 0;
 }
 
-.assistant-panel {
-  height: 100%;
+/* 打通整条 flex 高度链：el-card-body → el-form → el-form-item → wrapper → editor */
+.editor-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-card :deep(.el-form) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 只有正文内容的 form-item 需要 flex:1，标题的保持固定 */
+.editor-card :deep(.el-form-item:last-child) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-card :deep(.el-form-item:last-child .el-form-item__content) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .md-editor-wrapper {
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 8px;
   overflow: hidden;
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
 }
 
 .md-editor-wrapper :deep(.md-editor) {
@@ -489,14 +536,13 @@ void loadDocument()
 }
 
 .md-editor-wrapper :deep(.md-editor-preview-wrapper) {
-  background: #fafbfc;
+  background: var(--md-sys-color-surface-container-low);
+  padding: 16px 20px;
 }
 
-@media (max-width: 1200px) {
-  .editor-layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: 1fr;
-  }
+/* 编辑器内边距，提升长文阅读质感 */
+.md-editor-wrapper :deep(.md-editor-textarea) {
+  padding: 16px 20px !important;
 }
 
 @media (max-width: 768px) {

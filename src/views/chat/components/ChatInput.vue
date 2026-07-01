@@ -59,7 +59,7 @@ function onKeydown(event: KeyboardEvent) {
 <style scoped>
 .chat-input {
   padding: 20px 24px;
-  background: #ffffff;
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .input-wrapper {
@@ -68,7 +68,7 @@ function onKeydown(event: KeyboardEvent) {
 
 .text-input :deep(.el-textarea__inner) {
   border-radius: 12px;
-  border-color: #e5e7eb;
+  border-color: var(--md-sys-color-outline-variant);
   font-size: 15px;
   line-height: 1.6;
   padding: 12px 16px;
@@ -76,12 +76,12 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .text-input :deep(.el-textarea__inner:hover) {
-  border-color: #3b82f6;
+  border-color: var(--md-sys-color-primary);
 }
 
 .text-input :deep(.el-textarea__inner:focus) {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
 }
 
 .chat-input-footer {
@@ -92,8 +92,8 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .tip {
-  color: #9ca3af;
-  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
 }
 
 .actions {

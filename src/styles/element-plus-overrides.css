@@ -398,3 +398,10 @@
   background-color: var(--md-sys-color-surface-container);
   color: var(--md-sys-color-on-surface);
 }
+
+/* 表格溢出 tooltip：限制宽度 + 换行，防止撑破布局遮挡导航 */
+.el-tooltip__popper.is-dark {
+  max-width: 420px !important;
+  white-space: normal !important;
+  word-break: break-word;
+}

@@ -270,7 +270,7 @@ void loadPageData()
       </div>
 
       <div class="page-actions">
-        <el-button type="danger" plain :loading="deleting" @click="handleDeleteKnowledgeBase">删除知识库</el-button>
+        <el-button type="danger" text :loading="deleting" @click="handleDeleteKnowledgeBase">删除知识库</el-button>
         <el-button @click="loadPageData">刷新</el-button>
         <el-button type="primary" @click="goChat">进入问答页</el-button>
       </div>
@@ -376,14 +376,14 @@ void loadPageData()
 
 .page-title {
   margin: 0;
-  font-size: 24px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-headline-small);
+  color: var(--md-sys-color-on-surface);
 }
 
 .page-subtitle {
   margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
 .page-actions {
@@ -409,7 +409,7 @@ void loadPageData()
 .kb-info-card,
 .upload-card,
 .files-card {
-  border: 1px solid #e7edf7;
+  border: 1px solid var(--md-sys-color-outline-variant);
   flex-shrink: 0;
 }
 
@@ -441,12 +441,12 @@ void loadPageData()
 }
 
 .label {
-  color: #7a8699;
-  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-small);
 }
 
 .value {
-  color: #1f2a37;
+  color: var(--md-sys-color-on-surface);
 }
 
 @media (max-width: 768px) {

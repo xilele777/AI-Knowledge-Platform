@@ -168,17 +168,17 @@ void loadKnowledgeBases()
 
       <div class="page-actions">
         <el-button @click="loadKnowledgeBases">刷新</el-button>
-        <el-button type="primary" @click="openCreateDialog">新建知识库</el-button>
+        <el-button type="primary" size="large" @click="openCreateDialog">新建知识库</el-button>
       </div>
     </div>
 
-    <el-card class="toolbar-card" shadow="never">
+    <div class="search-bar">
       <el-input
         v-model="searchKeyword"
         placeholder="搜索知识库名称或描述"
         clearable
       />
-    </el-card>
+    </div>
 
     <el-alert
       v-if="errorMessage"
@@ -253,14 +253,14 @@ void loadKnowledgeBases()
 
 .page-title {
   margin: 0;
-  font-size: 24px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-headline-small);
+  color: var(--md-sys-color-on-surface);
 }
 
 .page-subtitle {
   margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
 .page-actions {
@@ -269,8 +269,8 @@ void loadKnowledgeBases()
   gap: 8px;
 }
 
-.toolbar-card {
-  border: 1px solid #e7edf7;
+.search-bar {
+  margin-bottom: 16px;
 }
 
 .error-alert {

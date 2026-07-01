@@ -58,15 +58,15 @@ function trimContent(content: string): string {
 <style scoped>
 .source-chunks {
   margin-top: 10px;
-  background: #f7f9fc;
-  border: 1px solid #e4e9f2;
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 10px;
   padding: 10px;
 }
 
 .source-header {
-  font-size: 12px;
-  color: #55637a;
+  font-size: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface-variant);
   margin-bottom: 8px;
 }
 
@@ -82,28 +82,28 @@ function trimContent(content: string): string {
 .source-item-title {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  color: #2f3b52;
+  font-size: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface);
   margin-bottom: 4px;
 }
 
 .source-item-meta {
   display: flex;
   gap: 10px;
-  font-size: 12px;
-  color: #7a879a;
+  font-size: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface-variant);
   margin-bottom: 6px;
 }
 
 .source-item-content {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--md-sys-typescale-body-small);
   line-height: 1.6;
-  color: #1f2d3d;
+  color: var(--md-sys-color-on-surface);
   white-space: pre-wrap;
 }
 
 .score {
-  color: #409eff;
+  color: var(--md-sys-color-primary);
 }
 </style>

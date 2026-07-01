@@ -156,10 +156,10 @@ void loadDocuments()
       <div>
         <h2 class="page-title">我的文档</h2>
       </div>
-      <el-button type="primary" @click="openCreateDialog">新建文档</el-button>
+      <el-button type="primary" size="large" @click="openCreateDialog">新建文档</el-button>
     </div>
 
-    <el-card class="search-card" shadow="never">
+    <div class="search-bar">
       <el-input
         v-model="searchKeyword"
         placeholder="按标题搜索文档"
@@ -171,7 +171,7 @@ void loadDocuments()
           <el-button @click="handleSearch">搜索</el-button>
         </template>
       </el-input>
-    </el-card>
+    </div>
 
     <el-alert
       v-if="errorMessage"
@@ -230,18 +230,18 @@ void loadDocuments()
 
 .page-title {
   margin: 0;
-  font-size: 24px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-headline-small);
+  color: var(--md-sys-color-on-surface);
 }
 
 .page-subtitle {
   margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
-.search-card {
-  border: 1px solid #e6edf6;
+.search-bar {
+  margin-bottom: 16px;
 }
 
 .error-alert {

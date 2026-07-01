@@ -91,7 +91,7 @@ void loadStats()
 
 .page-title {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--md-sys-typescale-headline-small);
   color: var(--md-sys-color-on-background);
   font-weight: 400;
 }
@@ -99,7 +99,7 @@ void loadStats()
 .page-subtitle {
   margin: 6px 0 0;
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 14px;
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
 .error-alert {
@@ -123,13 +123,13 @@ void loadStats()
 
 .stat-label {
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 14px;
+  font-size: var(--md-sys-typescale-label-large);
   font-weight: 500;
 }
 
 .stat-value {
   margin-top: 12px;
-  font-size: 36px;
+  font-size: var(--md-sys-typescale-display-small);
   line-height: 1;
   font-weight: 600;
   transition: color var(--md-sys-transition-medium);

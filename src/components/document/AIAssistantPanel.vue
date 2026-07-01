@@ -13,8 +13,6 @@ import {
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
 
-type SourceType = 'document' | 'custom'
-
 const props = defineProps<{
   currentContent: string
 }>()
@@ -33,19 +31,10 @@ const lastGeneratePayload = ref<{ systemPrompt: string; userPrompt: string } | n
 
 const form = reactive({
   action: 'polish' as AiAssistantAction,
-  source: 'document' as SourceType,
-  customText: '',
 })
 
 const hasDocContent = computed(() => Boolean(props.currentContent.trim()))
-
-const requestText = computed(() => {
-  if (form.source === 'document') {
-    return props.currentContent.trim()
-  }
-  return form.customText.trim()
-})
-
+const hasResult = computed(() => Boolean(resultText.value))
 const showEmptyState = computed(() => !running.value && !errorMessage.value && !resultText.value)
 
 async function runGenerate(systemPrompt: string, userPrompt: string) {
@@ -63,15 +52,9 @@ async function runGenerate(systemPrompt: string, userPrompt: string) {
     }
 
     const result = await generateAiTextStream(
-      {
-        systemPrompt,
-        userPrompt,
-        temperature: 0.7,
-      },
+      { systemPrompt, userPrompt, temperature: 0.7 },
       config,
-      (chunk) => {
-        resultText.value += chunk
-      }
+      (chunk) => { resultText.value += chunk },
     )
 
     if (!result.success) {
@@ -81,7 +64,7 @@ async function runGenerate(systemPrompt: string, userPrompt: string) {
 
     void track(ANALYTICS_EVENTS.AI_WRITING_CALL, {
       action: form.action,
-      source: form.source,
+      source: 'document',
       input_length: userPrompt.length,
       output_length: resultText.value.length,
       model: config.model,
@@ -95,12 +78,11 @@ async function runGenerate(systemPrompt: string, userPrompt: string) {
 }
 
 async function handleGenerate() {
-  if (!requestText.value) {
-    errorMessage.value = '请输入待处理文本，或切换为「使用当前文档内容」。'
+  if (!props.currentContent.trim()) {
+    errorMessage.value = '文档内容为空，请先输入正文。'
     return
   }
-
-  await runGenerate(getAiAssistantPrompt(form.action), requestText.value)
+  await runGenerate(getAiAssistantPrompt(form.action), props.currentContent.trim())
 }
 
 async function handleRegenerate() {
@@ -108,34 +90,26 @@ async function handleRegenerate() {
     ElMessage.warning('暂无可重新生成的内容')
     return
   }
-
   await runGenerate(lastGeneratePayload.value.systemPrompt, lastGeneratePayload.value.userPrompt)
 }
 
 function handleReplace() {
-  if (!resultText.value) {
-    return
-  }
+  if (!resultText.value) return
   emit('replace-content', resultText.value)
 }
 
 function handleAppend() {
-  if (!resultText.value) {
-    return
-  }
+  if (!resultText.value) return
   emit('append-content', resultText.value)
 }
 
 async function handleCopy() {
-  if (!resultText.value) {
-    return
-  }
-
+  if (!resultText.value) return
   try {
     await navigator.clipboard.writeText(resultText.value)
-    ElMessage.success('已复制到剪贴板')
+    ElMessage.success('已复制')
   } catch {
-    ElMessage.error('复制失败，请手动复制')
+    ElMessage.error('复制失败')
   }
 }
 </script>
@@ -143,69 +117,57 @@ async function handleCopy() {
 <template>
   <el-card class="assistant-card" shadow="never">
     <template #header>
-      <div class="assistant-header">
-        <span>AI 写作助手</span>
-      </div>
+      <span class="assistant-header">AI 写作助手</span>
     </template>
 
-    <el-form label-position="top" class="assistant-form">
-      <el-form-item label="操作类型">
-        <el-radio-group v-model="form.action" class="action-group">
-          <el-radio-button
-            v-for="item in aiAssistantActionOptions"
-            :key="item.value"
-            :label="item.value"
-          >
-            {{ item.label }}
-          </el-radio-button>
-        </el-radio-group>
-        <div class="action-desc">
-          {{ aiAssistantActionOptions.find((item) => item.value === form.action)?.description }}
-        </div>
-      </el-form-item>
-
-      <el-form-item label="文本来源">
-        <el-radio-group v-model="form.source">
-          <el-radio value="document">使用当前文档内容</el-radio>
-          <el-radio value="custom">手动输入文本</el-radio>
-        </el-radio-group>
-      </el-form-item>
+    <!-- 操作区 -->
+    <div class="form-area">
+      <el-radio-group v-model="form.action" size="small" class="action-group">
+        <el-radio-button
+          v-for="item in aiAssistantActionOptions"
+          :key="item.value"
+          :label="item.value"
+        >
+          {{ item.label }}
+        </el-radio-button>
+      </el-radio-group>
 
       <el-alert
-        v-if="form.source === 'document' && !hasDocContent"
-        title="当前文档内容为空，请先输入文档内容或切换为手动输入文本。"
+        v-if="!hasDocContent"
+        title="文档正文为空"
         type="warning"
         :closable="false"
         show-icon
         class="source-alert"
       />
 
-      <el-form-item v-if="form.source === 'custom'" label="待处理文本">
-        <el-input
-          v-model="form.customText"
-          type="textarea"
-          :rows="4"
-          resize="vertical"
-          maxlength="5000"
-          show-word-limit
-          placeholder="请输入要润色、扩写、总结或续写的文本"
-        />
-      </el-form-item>
-
       <div class="run-actions">
-        <el-button type="primary" :loading="running" class="run-btn" @click="handleGenerate">
-          生成结果
+        <el-button
+          v-if="!hasResult"
+          type="primary"
+          size="small"
+          :loading="running"
+          @click="handleGenerate"
+        >
+          生成
         </el-button>
-        <el-button :disabled="running || !lastGeneratePayload" @click="handleRegenerate">
+        <el-button
+          v-else
+          size="small"
+          plain
+          :loading="running"
+          @click="handleRegenerate"
+        >
           重新生成
         </el-button>
       </div>
-    </el-form>
+    </div>
 
+    <!-- 结果区：仅可滚动内容 -->
     <div class="result-wrapper">
       <el-alert
         v-if="running"
-        title="生成中..."
+        title="正在生成…"
         type="success"
         :closable="false"
         show-icon
@@ -220,119 +182,144 @@ async function handleCopy() {
         :closable="false"
       />
 
-      <el-empty v-else-if="showEmptyState" description="请选择操作并生成 AI 结果" :image-size="72" />
+      <el-empty v-else-if="showEmptyState" description="选择操作类型，点击生成" :image-size="56" />
 
-      <template v-else>
-        <div class="result-title">生成结果</div>
-
-        <div class="result-content">
-          <div class="answer-preview">
-            <MdPreview :model-value="resultText" />
-          </div>
+      <div v-else class="result-scroll">
+        <div class="answer-preview">
+          <MdPreview :model-value="resultText" />
         </div>
+      </div>
+    </div>
 
-        <div class="result-actions">
-          <el-button type="primary" plain @click="handleReplace">替换当前内容</el-button>
-          <el-button type="success" plain @click="handleAppend">插入到文档末尾</el-button>
-          <el-button @click="handleCopy">一键复制</el-button>
-        </div>
-      </template>
+    <!-- 底部操作：独立于结果区，固定在卡片底部 -->
+    <div v-if="hasResult" class="result-actions">
+      <el-button type="primary" size="small" @click="handleReplace">替换原文</el-button>
+      <el-button size="small" plain @click="handleAppend">插入到末尾</el-button>
+      <el-button size="small" plain @click="handleCopy">复制</el-button>
     </div>
   </el-card>
 </template>
 
 <style scoped>
 .assistant-card {
-  border: 1px solid #e6edf6;
+  border: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 关键：打通 el-card 内部 body 的 flex 高度链 */
+.assistant-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .assistant-header {
-  font-weight: bold;
-  font-size: 16px;
+  font-weight: 600;
+  font-size: var(--md-sys-typescale-title-small);
 }
 
-.assistant-form {
+/* ===== 操作区 ===== */
+.form-area {
   flex-shrink: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
+/* Radio 按钮组：单行均匀铺满 */
 .action-group {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  width: 100%;
 }
 
-.action-desc {
-  margin-top: 8px;
-  color: #8c8c8c;
-  font-size: 12px;
+.action-group :deep(.el-radio-button) {
+  flex: 1;
+}
+
+.action-group :deep(.el-radio-button__inner) {
+  width: 100%;
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  padding: 5px 0;
+  font-size: var(--md-sys-typescale-label-medium);
+  line-height: 1.4;
+  text-align: center;
+}
+
+.action-group :deep(.el-radio-button.is-active .el-radio-button__inner) {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: var(--md-sys-color-primary-container);
+  box-shadow: none;
 }
 
 .source-alert {
-  margin-bottom: 12px;
+  margin-top: 8px;
 }
 
 .run-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
-.run-btn {
-  flex: 0;
+/* 组件级强制覆盖全局 .el-button--default 的透明样式 */
+.run-actions :deep(.el-button--plain) {
+  background: var(--md-sys-color-surface-container-lowest);
+  border: 1px solid var(--md-sys-color-outline);
+  color: var(--md-sys-color-on-surface);
 }
 
+.run-actions :deep(.el-button--plain:hover) {
+  background: var(--md-sys-color-surface-container);
+}
+
+/* ===== 结果区 ===== */
 .result-wrapper {
-  margin-top: 14px;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  margin-top: 10px;
 }
 
 .loading-alert {
-  margin-bottom: 10px;
   flex-shrink: 0;
+  margin-bottom: 8px;
 }
 
-.result-title {
-  margin-bottom: 10px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.result-content {
+.result-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .answer-preview {
-  background: #fff;
-  padding: 12px;
-  border-radius: 8px;
-  border: 1px solid #e6edf8;
-  margin-bottom: 10px;
+  padding: 14px 16px;
 }
 
 :deep(.answer-preview .md-preview) {
-  font-size: 15px;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 :deep(.answer-preview .md-preview h1),
 :deep(.answer-preview .md-preview h2),
-:deep(.answer-preview .md-preview h3),
-:deep(.answer-preview .md-preview h4),
-:deep(.answer-preview .md-preview h5),
-:deep(.answer-preview .md-preview h6) {
-  margin-top: 12px;
-  margin-bottom: 6px;
-  color: #1f2d3d;
+:deep(.answer-preview .md-preview h3) {
+  margin-top: 10px;
+  margin-bottom: 4px;
+  color: var(--md-sys-color-on-surface);
 }
 
 :deep(.answer-preview .md-preview p) {
@@ -340,30 +327,44 @@ async function handleCopy() {
 }
 
 :deep(.answer-preview .md-preview code) {
-  background-color: #f5f7fa;
+  background-color: var(--md-sys-color-surface-container-low);
   padding: 2px 6px;
   border-radius: 4px;
+  font-size: 12px;
 }
 
 :deep(.answer-preview .md-preview pre) {
   background-color: #1e1e1e;
-  padding: 12px;
+  padding: 10px;
   border-radius: 8px;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 6px 0;
 }
 
 :deep(.answer-preview .md-preview pre code) {
   background: transparent;
   color: #d4d4d4;
   padding: 0;
+  font-size: 12px;
 }
 
+/* ===== 底部操作 ===== */
 .result-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
-  margin-top: auto;
+  margin-top: 10px;
+}
+
+/* 组件级强制覆盖全局 .el-button--default 的透明样式 */
+.result-actions :deep(.el-button--plain) {
+  background: var(--md-sys-color-surface-container-lowest);
+  border: 1px solid var(--md-sys-color-outline);
+  color: var(--md-sys-color-on-surface);
+}
+
+.result-actions :deep(.el-button--plain:hover) {
+  background: var(--md-sys-color-surface-container);
+  border-color: var(--md-sys-color-outline);
 }
 </style>

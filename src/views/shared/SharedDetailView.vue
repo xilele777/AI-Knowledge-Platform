@@ -119,17 +119,17 @@ onMounted(() => {
 
 .doc-title {
   margin: 0 0 12px 0;
-  font-size: 28px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-headline-medium);
+  color: var(--md-sys-color-on-surface);
 }
 
 .doc-meta {
-  color: #909399;
-  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
 .doc-content-card {
-  border: 1px solid #e6edf6;
+  border: 1px solid var(--md-sys-color-outline-variant);
 }
 
 :deep(.md-editor-preview-wrapper) {

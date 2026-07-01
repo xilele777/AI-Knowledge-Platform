@@ -113,14 +113,14 @@ void loadFiles()
 
 .page-title {
   margin: 0;
-  font-size: 24px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-headline-small);
+  color: var(--md-sys-color-on-surface);
 }
 
 .page-subtitle {
   margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-medium);
 }
 
 .error-alert {

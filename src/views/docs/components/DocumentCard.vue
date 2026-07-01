@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { MoreFilled } from '@element-plus/icons-vue'
 import type { DocumentListItem } from '../../../types/document'
 import { updateDocument } from '../../../api/documents'
 
@@ -54,6 +55,10 @@ const handleOpen = () => {
   emit('open', props.item.id)
 }
 
+const handleEdit = () => {
+  emit('open', props.item.id)
+}
+
 const handleRemove = () => {
   emit('remove', props.item.id)
 }
@@ -103,24 +108,56 @@ const handleToggleShare = async () => {
     <div class="doc-meta">最近更新: {{ formattedTime }}</div>
 
     <div class="doc-actions" @click.stop>
-      <el-button type="primary" link @click="handleOpen">编辑</el-button>
-      <el-button :type="item.isShared ? 'info' : 'success'" link @click="handleToggleShare">
-        {{ item.isShared ? '取消共享' : '共享' }}
-      </el-button>
-      <el-button type="danger" link @click="handleRemove">删除</el-button>
+      <el-dropdown trigger="click" placement="bottom-end">
+        <el-button class="more-btn" size="small" :icon="MoreFilled" circle />
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="handleEdit">
+              <span>编辑</span>
+            </el-dropdown-item>
+            <el-dropdown-item @click="handleToggleShare">
+              {{ item.isShared ? '取消共享' : '共享' }}
+            </el-dropdown-item>
+            <el-dropdown-item class="danger-item" divided @click="handleRemove">
+              删除
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
   </el-card>
 </template>
 
 <style scoped>
 .doc-card {
-  border: 1px solid #e6edf6;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.doc-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--md-sys-color-primary);
+  opacity: 0;
+  transition: opacity var(--md-sys-transition-medium) ease;
+  border-radius: 0 2px 2px 0;
 }
 
 .doc-card:hover {
   transform: translateY(-2px);
+  box-shadow: var(--md-sys-elevation-level-2);
+  border-color: var(--md-sys-color-outline);
+}
+
+.doc-card:hover::before {
+  opacity: 1;
 }
 
 .doc-header {
@@ -128,13 +165,14 @@ const handleToggleShare = async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .doc-title {
   margin: 0;
-  font-size: 16px;
-  color: #1f2a37;
+  font-size: var(--md-sys-typescale-title-medium);
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -147,14 +185,33 @@ const handleToggleShare = async () => {
 }
 
 .doc-meta {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .doc-actions {
   margin-top: 8px;
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+}
+
+.more-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity var(--md-sys-transition-medium) ease, transform var(--md-sys-transition-medium) ease;
+}
+
+.doc-card:hover .more-btn {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+:deep(.danger-item) {
+  color: var(--md-sys-color-error);
 }
 </style>
