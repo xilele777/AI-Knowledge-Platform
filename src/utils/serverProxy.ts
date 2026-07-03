@@ -25,15 +25,36 @@ export async function invokeEdgeFunction<TResponse>(
 ): Promise<TResponse> {
   assertSupabaseConfigured()
 
-  const { data, error } = await supabase.functions.invoke<TResponse>(name, {
-    body,
-  })
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
 
-  if (error) {
-    const message = error instanceof Error ? error.message : 'Edge Function request failed'
-    throw new EdgeFunctionError(message, error)
+  if (!accessToken) {
+    throw new EdgeFunctionError('Unauthorized')
   }
 
+  const response = await fetch(`${supabaseUrl}/functions/v1/${name}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    let message = `Edge Function request failed (${response.status})`
+    try {
+      const payload = await response.json()
+      if (typeof payload?.error === 'string') {
+        message = payload.error
+      }
+    } catch {
+      // Keep the status based message when the error body is not JSON.
+    }
+    throw new EdgeFunctionError(message)
+  }
+
+  const data = await response.json()
   return data as TResponse
 }
 
