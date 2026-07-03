@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { Delete } from '@element-plus/icons-vue'
 import { useAiConfigStore } from '@/stores/aiConfig'
 import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
+import GradientTitle from '@/components/shared/GradientTitle.vue'
 import ChatInput from './components/ChatInput.vue'
 import ChatMessageList from './components/ChatMessageList.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
@@ -185,7 +186,11 @@ useKeyboardShortcut({
       <main class="main-content">
         <header class="chat-header">
           <div class="header-left">
-            <h2 class="header-title">智能对话</h2>
+            <GradientTitle
+              title="智能对话"
+              subtitle="AI Chat"
+              :gradient="'var(--gradient-purple)'"
+            />
             <p class="header-subtitle">
               {{ selectedKnowledgeBaseName }} · {{ qaSummaryText }}
             </p>
@@ -431,11 +436,17 @@ useKeyboardShortcut({
   min-width: 0;
 }
 
-.header-title {
+.header-left :deep(.gradient-title-wrapper) {
+  margin-bottom: 4px;
+}
+
+.header-left :deep(.gradient-heading) {
   font-size: var(--md-sys-typescale-title-medium);
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-  margin: 0 0 4px 0;
+}
+
+.header-left :deep(.gradient-subtitle) {
+  font-size: var(--md-sys-typescale-label-small);
+  margin-bottom: 2px;
 }
 
 .header-subtitle {

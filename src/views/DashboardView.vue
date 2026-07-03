@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Search, Refresh } from '@element-plus/icons-vue'
 import { getMyDocuments } from '@/api/documents'
 import { getAdminDashboardStats } from '@/api/admin'
 import type { AdminDashboardStats } from '@/api/admin'
@@ -8,11 +9,14 @@ import type { DocumentListItem } from '@/types/document'
 import { useAsyncState } from '@/composables/useAsyncState'
 import { useNumberTween } from '@/composables/useNumberTween'
 import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
-import PageHeader from '@/components/shared/PageHeader.vue'
+import GradientTitle from '@/components/shared/GradientTitle.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import SvgIcon from '@/components/shared/SvgIcon.vue'
 
 const router = useRouter()
+const SearchIcon = Search
+const RefreshIcon = Refresh
+const searchQuery = ref('')
 
 // ─── 数据获取 ───
 const statsState = useAsyncState<AdminDashboardStats>({ initialData: null })
@@ -119,12 +123,27 @@ useKeyboardShortcut({
 <template>
   <div class="dashboard">
     <!-- 头部 -->
-    <PageHeader
-      title="工作台"
-      subtitle="欢迎使用 AI 知识库平台"
-    >
-      <el-button @click="loadAll" :loading="isLoading">刷新</el-button>
-    </PageHeader>
+    <div class="dashboard-header">
+      <GradientTitle
+        title="工作台"
+        subtitle="Dashboard"
+        description="AI 知识库平台指挥中心"
+        :gradient="'var(--gradient-blue)'"
+      />
+      <div class="header-search">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索文档、知识库或问答内容..."
+          size="large"
+          clearable
+          :prefix-icon="SearchIcon"
+          class="search-input"
+        />
+      </div>
+      <div class="header-actions">
+        <el-button @click="loadAll" :loading="isLoading" :icon="RefreshIcon" round>刷新</el-button>
+      </div>
+    </div>
 
     <!-- 骨架屏 -->
     <template v-if="isLoading">
@@ -212,6 +231,49 @@ useKeyboardShortcut({
 <style scoped>
 .dashboard {
   padding: 4px;
+}
+
+/* ── 头部 ── */
+.dashboard-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 40px;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.dashboard-header :deep(.gradient-title-wrapper) {
+  margin-bottom: 0;
+}
+
+.header-search {
+  flex: 1;
+  max-width: 480px;
+  min-width: 240px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 9999px;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
+  transition: box-shadow var(--md-sys-transition-medium) var(--ease-out-expo),
+              border-color var(--md-sys-transition-medium) var(--ease-out-expo);
+}
+
+.search-input :deep(.el-input__wrapper:hover) {
+  border-color: var(--md-sys-color-outline);
+  box-shadow: var(--shadow-lg);
+}
+
+.search-input :deep(.el-input__wrapper.is-focus) {
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12), var(--shadow-lg);
+}
+
+.header-actions {
+  flex-shrink: 0;
 }
 
 /* ── 统计卡片网格 ── */

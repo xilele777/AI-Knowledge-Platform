@@ -210,3 +210,65 @@
     rgba(168, 199, 250, 0.05)
   );
 }
+
+/* ================================================================
+ * Phase 5 — CSUSTAR 风格模块主题色 & 渐变文字工具类
+ * ================================================================ */
+:root {
+  /* 模块主题色 */
+  --module-docs: #1a73e8;
+  --module-docs-light: rgba(26, 115, 232, 0.08);
+  --module-knowledge: #0f9d58;
+  --module-knowledge-light: rgba(15, 157, 88, 0.08);
+  --module-chat: #7c4dff;
+  --module-chat-light: rgba(124, 77, 255, 0.08);
+  --module-shared: #ff6d01;
+  --module-shared-light: rgba(255, 109, 1, 0.08);
+  --module-profile: #7c4dff;
+  --module-profile-light: rgba(124, 77, 255, 0.08);
+  --module-dashboard: #1a73e8;
+  --module-dashboard-light: rgba(26, 115, 232, 0.08);
+
+  /* 渐变文字 */
+  --gradient-blue: linear-gradient(135deg, #1a73e8, #4285f4);
+  --gradient-purple: linear-gradient(135deg, #7c4dff, #a78bfa);
+  --gradient-green: linear-gradient(135deg, #0f9d58, #34d399);
+  --gradient-orange: linear-gradient(135deg, #ff6d01, #fbbf24);
+  --gradient-warm: linear-gradient(135deg, #1a73e8, #7c4dff, #ff6d01);
+}
+
+/* 渐变文字工具类 */
+.gradient-text {
+  background: var(--gradient-warm);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-blue {
+  background: var(--gradient-blue);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-green {
+  background: var(--gradient-green);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-purple {
+  background: var(--gradient-purple);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-orange {
+  background: var(--gradient-orange);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

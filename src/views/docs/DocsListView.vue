@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import DocumentCard from './components/DocumentCard.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
+import GradientTitle from '@/components/shared/GradientTitle.vue'
+import CapsuleTabs from '@/components/shared/CapsuleTabs.vue'
 import {
   createDocument,
   deleteDocument,
@@ -23,6 +25,18 @@ interface CreateForm {
 const router = useRouter()
 const loading = ref(false)
 const submitting = ref(false)
+const statusFilter = ref<string>('all')
+
+const statusTabs = [
+  { label: '全部', value: 'all' },
+  { label: '已发布', value: 'published' },
+  { label: '草稿', value: 'draft' },
+]
+
+const filteredDocs = computed(() => {
+  if (statusFilter.value === 'all') return docs.value
+  return docs.value.filter((d) => d.status === statusFilter.value)
+})
 const docs = ref<DocumentListItem[]>([])
 const searchKeyword = ref('')
 const errorMessage = ref('')
@@ -154,25 +168,34 @@ void loadDocuments()
 
 <template>
   <div class="docs-page">
-    <div class="docs-topbar">
-      <div>
-        <h2 class="page-title">我的文档</h2>
+    <div class="docs-header">
+      <GradientTitle
+        title="我的文档"
+        subtitle="Documents"
+        description="创建、编辑和管理你的知识文档"
+        :gradient="'var(--gradient-blue)'"
+      />
+      <div class="header-row">
+        <CapsuleTabs v-model="statusFilter" :tabs="statusTabs" color="var(--module-docs)" />
+        <div class="header-actions">
+          <div class="search-bar">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="按标题搜索..."
+              size="large"
+              clearable
+              @clear="handleSearch"
+              @keyup.enter="handleSearch"
+              class="search-input"
+            >
+              <template #prefix>
+                <el-icon><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></el-icon>
+              </template>
+            </el-input>
+          </div>
+          <el-button type="primary" size="large" @click="openCreateDialog">新建文档</el-button>
+        </div>
       </div>
-      <el-button type="primary" size="large" @click="openCreateDialog">新建文档</el-button>
-    </div>
-
-    <div class="search-bar">
-      <el-input
-        v-model="searchKeyword"
-        placeholder="按标题搜索文档"
-        clearable
-        @clear="handleSearch"
-        @keyup.enter="handleSearch"
-      >
-        <template #append>
-          <el-button @click="handleSearch">搜索</el-button>
-        </template>
-      </el-input>
     </div>
 
     <el-alert
@@ -188,7 +211,7 @@ void loadDocuments()
       <SkeletonCard v-if="loading" :count="6" variant="card" />
 
       <EmptyStateActionable
-        v-else-if="!loading && docs.length === 0"
+        v-else-if="!loading && filteredDocs.length === 0"
         icon="empty-doc"
         title="还没有文档"
         description="创建你的第一篇文档，AI 助手会帮你润色和总结"
@@ -198,7 +221,7 @@ void loadDocuments()
 
       <div v-else class="card-grid">
         <DocumentCard
-          v-for="item in docs"
+          v-for="item in filteredDocs"
           :key="item.id"
           :item="item"
           @open="handleOpenDoc"
@@ -233,28 +256,49 @@ void loadDocuments()
   padding: 4px;
 }
 
-.docs-topbar {
+/* ── 头部 ── */
+.docs-header {
+  margin-bottom: 32px;
+}
+
+.docs-header :deep(.gradient-title-wrapper) {
+  margin-bottom: 20px;
+}
+
+.header-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
-.page-title {
-  margin: 0;
-  font-size: var(--md-sys-typescale-headline-small);
-  color: var(--md-sys-color-on-surface);
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .search-bar {
-  margin-bottom: 16px;
+  width: 240px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 9999px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--md-sys-transition-fast) ease;
+}
+
+.search-input :deep(.el-input__wrapper:hover) {
+  border-color: var(--md-sys-color-outline);
+}
+
+.search-input :deep(.el-input__wrapper.is-focus) {
+  border-color: var(--module-docs);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12), var(--shadow-md);
 }
 
 .error-alert {

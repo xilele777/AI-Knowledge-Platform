@@ -73,7 +73,6 @@ const activeMenu = computed(() => {
   return path
 })
 
-const pageTitle = computed(() => String(route.meta?.title || ''))
 const isAdmin = computed(() => userStore.isAdmin)
 
 function handleMenuCommand(command: string) {
@@ -96,12 +95,18 @@ function handleMenuCommand(command: string) {
     <el-aside width="240px" class="layout-aside">
       <div class="aside-header">
         <div class="app-logo">
-          <svg width="36" height="36" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="#1a73e8" />
-            <path d="M10 12h12v2H10v-2zm0 6h12v2H10v-2z" fill="white" />
+          <svg width="40" height="40" viewBox="0 0 48 48" fill="none">
+            <defs>
+              <linearGradient id="nav-logo-grad" x1="0" y1="0" x2="48" y2="48">
+                <stop stop-color="#1a73e8"/>
+                <stop offset="1" stop-color="#7c4dff"/>
+              </linearGradient>
+            </defs>
+            <rect width="48" height="48" rx="12" fill="url(#nav-logo-grad)"/>
+            <path d="M14 17h20v3H14v-3zm0 11h20v3H14v-3z" fill="white"/>
           </svg>
         </div>
-        <div class="app-title">{{ appTitle }}</div>
+        <div class="app-title gradient-text">{{ appTitle }}</div>
       </div>
 
       <nav class="menu">
@@ -126,9 +131,7 @@ function handleMenuCommand(command: string) {
     <!-- ===== 右侧内容区 ===== -->
     <el-container class="layout-container">
       <el-header class="layout-header">
-        <div class="header-left">
-          <h3 class="page-title">{{ pageTitle || '首页' }}</h3>
-        </div>
+        <div class="header-left" />
         <div class="header-right">
           <!-- 暗色模式切换 -->
           <el-button
@@ -226,11 +229,11 @@ function handleMenuCommand(command: string) {
 }
 
 .app-title {
-  font-size: var(--md-sys-typescale-title-medium);
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-  letter-spacing: 0.1px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
 }
+
 
 /* ---------- 菜单 ---------- */
 .menu {
@@ -260,6 +263,7 @@ function handleMenuCommand(command: string) {
   font-size: var(--md-sys-typescale-label-large);
   font-weight: 500;
   cursor: pointer;
+  position: relative;
   transition: all var(--md-sys-transition-medium) var(--md-sys-motion-easing-standard);
 }
 
@@ -272,6 +276,19 @@ function handleMenuCommand(command: string) {
   background-color: var(--md-sys-color-primary-container);
   color: var(--md-sys-color-on-primary-container);
   font-weight: 600;
+  box-shadow: 0 0 12px rgba(26, 115, 232, 0.15);
+}
+
+.menu-item.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--md-sys-color-primary);
+  border-radius: 0 3px 3px 0;
 }
 
 .menu-item-icon {
@@ -309,13 +326,6 @@ function handleMenuCommand(command: string) {
   flex-shrink: 0;
   padding: 0 var(--md-sys-spacing-lg);
   height: 64px;
-}
-
-.page-title {
-  font-size: var(--md-sys-typescale-headline-small);
-  font-weight: 400;
-  color: var(--md-sys-color-on-surface);
-  margin: 0;
 }
 
 /* ---------- 用户区 ---------- */
@@ -447,10 +457,6 @@ function handleMenuCommand(command: string) {
 
   .layout-main {
     padding: var(--md-sys-spacing-md);
-  }
-
-  .page-title {
-    font-size: var(--md-sys-typescale-title-large);
   }
 
   .user-name {

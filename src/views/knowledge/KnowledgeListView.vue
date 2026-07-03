@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { createKnowledgeBase, deleteKnowledgeBase, getMyKnowledgeBases } from '../../api/knowledge'
 import type { CreateKnowledgeBaseInput, KnowledgeBaseListItem } from '../../types/knowledge'
+import GradientTitle from '@/components/shared/GradientTitle.vue'
 import KnowledgeCard from './components/KnowledgeCard.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
@@ -164,22 +165,27 @@ void loadKnowledgeBases()
 <template>
   <div class="knowledge-list-page">
     <div class="page-header">
-      <div>
-        <h2 class="page-title">知识库列表</h2>
-      </div>
-
+      <GradientTitle
+        title="知识库"
+        subtitle="Knowledge Base"
+        description="管理你的知识库，上传文档并开启 AI 智能问答"
+        :gradient="'var(--gradient-green)'"
+      />
       <div class="page-actions">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索知识库..."
+          size="large"
+          clearable
+          class="search-input"
+        >
+          <template #prefix>
+            <el-icon><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></el-icon>
+          </template>
+        </el-input>
         <el-button @click="loadKnowledgeBases">刷新</el-button>
         <el-button type="primary" size="large" @click="openCreateDialog">新建知识库</el-button>
       </div>
-    </div>
-
-    <div class="search-bar">
-      <el-input
-        v-model="searchKeyword"
-        placeholder="搜索知识库名称或描述"
-        clearable
-      />
     </div>
 
     <el-alert
@@ -252,32 +258,43 @@ void loadKnowledgeBases()
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 24px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
 }
 
-.page-title {
-  margin: 0;
-  font-size: var(--md-sys-typescale-headline-small);
-  color: var(--md-sys-color-on-surface);
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
+.page-header :deep(.gradient-title-wrapper) {
+  margin-bottom: 0;
 }
 
 .page-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.search-bar {
-  margin-bottom: 16px;
+.search-input {
+  width: 240px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 9999px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--md-sys-transition-fast) ease;
+}
+
+.search-input :deep(.el-input__wrapper:hover) {
+  border-color: var(--md-sys-color-outline);
+}
+
+.search-input :deep(.el-input__wrapper.is-focus) {
+  border-color: var(--module-knowledge);
+  box-shadow: 0 0 0 3px rgba(15, 157, 88, 0.12), var(--shadow-md);
 }
 
 .error-alert {
@@ -285,7 +302,6 @@ void loadKnowledgeBases()
 }
 
 .content-wrapper {
-  margin-top: 16px;
   min-height: 240px;
 }
 

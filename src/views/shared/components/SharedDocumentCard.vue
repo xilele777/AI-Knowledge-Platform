@@ -78,7 +78,7 @@ const handleOpen = () => {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: var(--md-sys-color-primary);
+  background: var(--module-shared);
   opacity: 0;
   transition: opacity var(--md-sys-transition-medium) ease;
   border-radius: 0 2px 2px 0;
