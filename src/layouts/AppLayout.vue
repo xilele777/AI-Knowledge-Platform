@@ -1,0 +1,464 @@
+<script setup lang="ts">
+import { computed, type Component } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  Document,
+  Share,
+  Collection,
+  ChatDotRound,
+  User,
+  HomeFilled,
+  Folder,
+  ChatLineSquare,
+  DataAnalysis,
+  ArrowLeftBold,
+  Sunny,
+  Moon,
+} from '@element-plus/icons-vue'
+import type { MenuGroup } from '../router/menus'
+import { useUserStore } from '../stores/user'
+import { useDarkMode } from '../composables/useDarkMode'
+
+const darkMode = useDarkMode()
+
+interface DropdownAction {
+  /** 唯一标识 */
+  key: string
+  /** 显示文案 */
+  label: string
+  /** 是否显示分割线 */
+  divided?: boolean
+  /** 是否渲染为危险操作（红色） */
+  danger?: boolean
+}
+
+interface Props {
+  /** 菜单分组数据 */
+  menuGroups: MenuGroup[]
+  /** 左上角标题 */
+  appTitle?: string
+  /** 下拉菜单额外操作（在"退出登录"之前插入） */
+  extraActions?: DropdownAction[]
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  appTitle: 'AI 知识库平台',
+  extraActions: () => [],
+})
+
+/** 合并所有布局可能用到的图标映射 */
+const iconMap: Record<string, Component> = {
+  Document,
+  Share,
+  Collection,
+  ChatDotRound,
+  User,
+  HomeFilled,
+  Folder,
+  ChatLineSquare,
+  DataAnalysis,
+}
+
+const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
+
+const activeMenu = computed(() => {
+  const path = route.path
+  if (path === '/dashboard') return '/dashboard'
+  if (path.startsWith('/docs/')) return '/docs'
+  if (path.startsWith('/knowledge/')) return '/knowledge'
+  if (path.startsWith('/shared/')) return '/shared'
+  if (path.startsWith('/admin/')) return path
+  return path
+})
+
+const pageTitle = computed(() => String(route.meta?.title || ''))
+const isAdmin = computed(() => userStore.isAdmin)
+
+function handleMenuCommand(command: string) {
+  const action = props.extraActions.find((a) => a.key === command)
+  if (action) {
+    if (action.key === 'admin') router.push('/admin')
+    else if (action.key === 'back') router.push('/dashboard')
+    return
+  }
+
+  if (command === 'logout') {
+    void userStore.logout().then(() => router.replace('/login'))
+  }
+}
+</script>
+
+<template>
+  <el-container class="layout-shell">
+    <!-- ===== 左侧导航 ===== -->
+    <el-aside width="240px" class="layout-aside">
+      <div class="aside-header">
+        <div class="app-logo">
+          <svg width="36" height="36" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="8" fill="#1a73e8" />
+            <path d="M10 12h12v2H10v-2zm0 6h12v2H10v-2z" fill="white" />
+          </svg>
+        </div>
+        <div class="app-title">{{ appTitle }}</div>
+      </div>
+
+      <nav class="menu">
+        <template v-for="group in menuGroups" :key="group.label">
+          <div class="menu-group-label">{{ group.label }}</div>
+          <div
+            v-for="item in group.items"
+            :key="item.index"
+            class="menu-item"
+            :class="{ active: activeMenu === item.index }"
+            @click="router.push(item.index)"
+          >
+            <el-icon class="menu-item-icon" :size="18">
+              <component :is="iconMap[item.icon]" />
+            </el-icon>
+            <span class="menu-item-text">{{ item.title }}</span>
+          </div>
+        </template>
+      </nav>
+    </el-aside>
+
+    <!-- ===== 右侧内容区 ===== -->
+    <el-container class="layout-container">
+      <el-header class="layout-header">
+        <div class="header-left">
+          <h3 class="page-title">{{ pageTitle || '首页' }}</h3>
+        </div>
+        <div class="header-right">
+          <!-- 暗色模式切换 -->
+          <el-button
+            circle
+            size="small"
+            class="theme-toggle-btn"
+            :title="darkMode.isDark.value ? '切换浅色模式' : '切换暗色模式'"
+            @click="darkMode.toggle()"
+          >
+            <el-icon :size="16">
+              <Sunny v-if="darkMode.isDark.value" />
+              <Moon v-else />
+            </el-icon>
+          </el-button>
+
+          <el-dropdown trigger="click" placement="bottom-end" @command="handleMenuCommand">
+            <div class="user-avatar-trigger">
+              <el-avatar :size="32" class="user-avatar">
+                {{ (userStore.user?.email || 'U')[0].toUpperCase() }}
+              </el-avatar>
+              <span class="user-name">{{ userStore.user?.email || '用户' }}</span>
+              <el-icon class="dropdown-caret"><ArrowLeftBold /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item disabled class="dropdown-user-info">
+                  <div class="dropdown-email">{{ userStore.user?.email || '-' }}</div>
+                  <el-tag v-if="isAdmin" size="small" type="info" class="dropdown-role-tag">
+                    管理员
+                  </el-tag>
+                </el-dropdown-item>
+
+                <template v-for="action in extraActions" :key="action.key">
+                  <el-dropdown-item :command="action.key" :divided="action.divided">
+                    <span :class="{ 'logout-text': action.danger }">{{ action.label }}</span>
+                  </el-dropdown-item>
+                </template>
+
+                <el-dropdown-item
+                  command="logout"
+                  :divided="extraActions.length > 0"
+                >
+                  <span class="logout-text">退出登录</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </el-header>
+
+      <el-main class="layout-main">
+        <router-view v-slot="{ Component }">
+          <Transition name="page-fade" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </router-view>
+      </el-main>
+    </el-container>
+  </el-container>
+</template>
+
+<style scoped>
+.layout-shell {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  overflow: hidden;
+  background-color: var(--md-sys-color-background);
+}
+
+/* ---------- 侧边栏 ---------- */
+.layout-aside {
+  width: 240px;
+  flex-shrink: 0;
+  background-color: var(--md-sys-color-surface-container-lowest);
+  border-right: 1px solid var(--md-sys-color-outline-variant);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.aside-header {
+  padding: var(--md-sys-spacing-md) var(--md-sys-spacing-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--md-sys-spacing-sm);
+  flex-shrink: 0;
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: var(--md-sys-typescale-title-medium);
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  letter-spacing: 0.1px;
+}
+
+/* ---------- 菜单 ---------- */
+.menu {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--md-sys-spacing-sm) var(--md-sys-spacing-sm);
+}
+
+.menu-group-label {
+  padding: var(--md-sys-spacing-md) var(--md-sys-spacing-sm) var(--md-sys-spacing-xs);
+  font-size: var(--md-sys-typescale-label-small);
+  font-weight: 600;
+  color: var(--md-sys-color-outline);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--md-sys-spacing-sm);
+  height: 44px;
+  padding: 0 12px;
+  margin-bottom: 2px;
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-large);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--md-sys-transition-medium) var(--md-sys-motion-easing-standard);
+}
+
+.menu-item:hover {
+  background-color: rgba(0, 0, 0, var(--md-sys-state-hover-opacity));
+  color: var(--md-sys-color-on-surface);
+}
+
+.menu-item.active {
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font-weight: 600;
+}
+
+.menu-item-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.menu-item.active .menu-item-icon {
+  opacity: 1;
+}
+
+.menu-item-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 右侧容器 ---------- */
+.layout-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  background-color: var(--md-sys-color-background);
+}
+
+/* ---------- 顶部栏 ---------- */
+.layout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  background-color: var(--md-sys-color-surface-container-lowest);
+  flex-shrink: 0;
+  padding: 0 var(--md-sys-spacing-lg);
+  height: 64px;
+}
+
+.page-title {
+  font-size: var(--md-sys-typescale-headline-small);
+  font-weight: 400;
+  color: var(--md-sys-color-on-surface);
+  margin: 0;
+}
+
+/* ---------- 用户区 ---------- */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-toggle-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: all var(--md-sys-transition-medium) ease;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--md-sys-color-surface-container);
+  border-color: var(--md-sys-color-outline);
+  color: var(--md-sys-color-on-surface);
+}
+
+.user-avatar-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 12px 4px 4px;
+  border-radius: var(--md-sys-shape-corner-full);
+  transition: background-color var(--md-sys-transition-medium) ease;
+}
+
+.user-avatar-trigger:hover {
+  background-color: var(--md-sys-color-surface-container);
+}
+
+.user-avatar {
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.user-name {
+  font-size: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-caret {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  transform: rotate(-90deg);
+  transition: transform var(--md-sys-transition-medium) ease;
+}
+
+.dropdown-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start !important;
+}
+
+.dropdown-email {
+  font-size: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface);
+  font-weight: 500;
+}
+
+.dropdown-role-tag {
+  pointer-events: none;
+}
+
+.logout-text {
+  color: var(--md-sys-color-error);
+}
+
+/* ---------- 内容区 ---------- */
+.layout-main {
+  padding: var(--md-sys-spacing-lg);
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  background-color: var(--md-sys-color-background);
+}
+
+/* ---------- 页面过渡动画 ---------- */
+.page-fade-enter-active {
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.page-fade-leave-active {
+  transition: opacity 150ms ease-in,
+              transform 150ms ease-in;
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 768px) {
+  .layout-aside {
+    width: 0;
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    z-index: 100;
+    transition: width 0.3s ease;
+    box-shadow: var(--md-sys-elevation-level-3);
+  }
+
+  .layout-aside.open {
+    width: 240px;
+  }
+
+  .layout-main {
+    padding: var(--md-sys-spacing-md);
+  }
+
+  .page-title {
+    font-size: var(--md-sys-typescale-title-large);
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  .user-avatar-trigger {
+    padding: 4px;
+  }
+}
+</style>

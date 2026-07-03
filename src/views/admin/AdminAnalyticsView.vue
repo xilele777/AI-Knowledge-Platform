@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import VChart from 'vue-echarts'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { getAdminAnalyticsOverview, type AdminAnalyticsOverview } from '../../api/admin'
+
+const VChart = defineAsyncComponent(() => import('vue-echarts'))
 
 use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent])
 

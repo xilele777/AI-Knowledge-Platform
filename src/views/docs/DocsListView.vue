@@ -4,6 +4,8 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import DocumentCard from './components/DocumentCard.vue'
+import SkeletonCard from '@/components/shared/SkeletonCard.vue'
+import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
 import {
   createDocument,
   deleteDocument,
@@ -182,17 +184,28 @@ void loadDocuments()
       :closable="false"
     />
 
-    <div v-loading="loading" class="docs-content">
-      <el-empty
-        v-if="!loading && docs.length === 0"
-        description="暂无文档，点击「新建文档」开始创作"
+    <div class="docs-content">
+      <SkeletonCard v-if="loading" :count="6" variant="card" />
+
+      <EmptyStateActionable
+        v-else-if="!loading && docs.length === 0"
+        icon="empty-doc"
+        title="还没有文档"
+        description="创建你的第一篇文档，AI 助手会帮你润色和总结"
+        action-text="新建文档"
+        @action="openCreateDialog"
       />
 
-      <el-row v-else :gutter="16">
-        <el-col v-for="item in docs" :key="item.id" :xs="24" :sm="12" :lg="8">
-          <DocumentCard :item="item" @open="handleOpenDoc" @remove="handleDeleteDoc" @update="loadDocuments" />
-        </el-col>
-      </el-row>
+      <div v-else class="card-grid">
+        <DocumentCard
+          v-for="item in docs"
+          :key="item.id"
+          :item="item"
+          @open="handleOpenDoc"
+          @remove="handleDeleteDoc"
+          @update="loadDocuments"
+        />
+      </div>
     </div>
 
     <el-dialog
@@ -253,8 +266,10 @@ void loadDocuments()
   min-height: 240px;
 }
 
-:deep(.el-col) {
-  margin-bottom: 16px;
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
 }
 
 @media (max-width: 768px) {

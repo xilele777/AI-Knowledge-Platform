@@ -11,6 +11,12 @@ export interface MenuGroup {
 
 export const mainMenuGroups: MenuGroup[] = [
   {
+    label: '工作台',
+    items: [
+      { index: '/dashboard', title: '总览', icon: 'HomeFilled' },
+    ],
+  },
+  {
     label: '内容',
     items: [
       { index: '/docs', title: '文档', icon: 'Document' },

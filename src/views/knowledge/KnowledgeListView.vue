@@ -6,6 +6,8 @@ import { useRouter } from 'vue-router'
 import { createKnowledgeBase, deleteKnowledgeBase, getMyKnowledgeBases } from '../../api/knowledge'
 import type { CreateKnowledgeBaseInput, KnowledgeBaseListItem } from '../../types/knowledge'
 import KnowledgeCard from './components/KnowledgeCard.vue'
+import SkeletonCard from '@/components/shared/SkeletonCard.vue'
+import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
 
@@ -189,23 +191,28 @@ void loadKnowledgeBases()
       class="error-alert"
     />
 
-    <div v-loading="loading" class="content-wrapper">
-      <el-empty
-        v-if="!loading && filteredKnowledgeBases.length === 0"
-        :description="knowledgeBases.length === 0 ? '暂无知识库,点击右上角创建' : '没有匹配的知识库'"
+    <div class="content-wrapper">
+      <SkeletonCard v-if="loading" :count="6" variant="card" />
+
+      <EmptyStateActionable
+        v-else-if="!loading && filteredKnowledgeBases.length === 0"
+        icon="knowledge"
+        :title="knowledgeBases.length === 0 ? '还没有知识库' : '没有匹配的知识库'"
+        :description="knowledgeBases.length === 0 ? '创建知识库，上传文档并开启 AI 智能问答' : ''"
+        :action-text="knowledgeBases.length === 0 ? '新建知识库' : ''"
+        :show-action="knowledgeBases.length === 0"
+        @action="openCreateDialog"
       />
 
-      <el-row v-else :gutter="16">
-        <el-col
+      <div v-else class="card-grid">
+        <KnowledgeCard
           v-for="item in filteredKnowledgeBases"
           :key="item.id"
-          :xs="24"
-          :sm="12"
-          :lg="8"
-        >
-          <KnowledgeCard :item="item" @open="handleEnterDetail" @delete="handleDeleteKnowledgeBase" />
-        </el-col>
-      </el-row>
+          :item="item"
+          @open="handleEnterDetail"
+          @delete="handleDeleteKnowledgeBase"
+        />
+      </div>
     </div>
 
     <el-dialog
@@ -282,8 +289,10 @@ void loadKnowledgeBases()
   min-height: 240px;
 }
 
-:deep(.el-col) {
-  margin-bottom: 16px;
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
 }
 
 @media (max-width: 768px) {

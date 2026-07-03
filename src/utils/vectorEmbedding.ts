@@ -48,7 +48,7 @@ function normalizeEmbeddingResponse(payload: EmbeddingApiResponse, expectedCount
 
 async function requestEmbeddings(
   input: string | string[],
-  config: AiResolvedConfig,
+  _config: AiResolvedConfig,
 ): Promise<EmbeddingResult[]> {
   const payload = await invokeEdgeFunction<EmbeddingApiResponse>('ai-embeddings', {
     input,

@@ -90,4 +90,123 @@
   --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
   --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+  /* ================================================================
+   * Phase 3 新增 Tokens
+   * ================================================================ */
+
+  /* ── Slate 灰色系（Linear 风格） ── */
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --slate-950: #020617;
+
+  /* ── Accent 梯度（数据可视化 + 状态标签） ── */
+  --accent-amber: #f59e0b;
+  --accent-emerald: #10b981;
+  --accent-violet: #8b5cf6;
+  --accent-rose: #f43f5e;
+  --accent-cyan: #06b6d4;
+
+  /* ── 页面级排版 ── */
+  --page-padding-x: 48px;
+  --page-padding-y: 40px;
+  --page-max-width: 1280px;
+  --page-content-gap: 32px;
+  --card-padding: 24px;
+  --card-gap: 20px;
+
+  /* ── 双层阴影（Umbra + Penumbra） ── */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 2px 4px rgba(0, 0, 0, 0.06), 0 12px 36px rgba(0, 0, 0, 0.07);
+
+  /* ── 动画曲线 ── */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── 毛玻璃（Glassmorphism） ── */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-blur: 20px;
+  --glass-border: rgba(0, 0, 0, 0.06);
+
+  /* ── 焦点环 ── */
+  --focus-ring-color: rgba(26, 115, 232, 0.4);
+  --focus-ring-width: 3px;
+
+  /* ── 背景渐变 ── */
+  --bg-gradient-subtle: linear-gradient(
+    180deg,
+    var(--md-sys-color-surface-container-lowest) 0%,
+    var(--md-sys-color-surface-container-low) 100%
+  );
+}
+
+/* ================================================================
+ * 暗色模式
+ * ================================================================ */
+[data-theme="dark"] {
+  --md-sys-color-primary: #a8c7fa;
+  --md-sys-color-on-primary: #062e6f;
+  --md-sys-color-primary-container: #0842a0;
+  --md-sys-color-on-primary-container: #d3e3fd;
+  --md-sys-color-secondary: #7fcb9b;
+  --md-sys-color-on-secondary: #051e11;
+  --md-sys-color-secondary-container: #00522e;
+  --md-sys-color-on-secondary-container: #c8e6c9;
+  --md-sys-color-tertiary: #c4b5fd;
+  --md-sys-color-on-tertiary: #250059;
+  --md-sys-color-tertiary-container: #4a2cb0;
+  --md-sys-color-on-tertiary-container: #eaddff;
+  --md-sys-color-surface: #1c1b1f;
+  --md-sys-color-on-surface: #e6e1e5;
+  --md-sys-color-surface-variant: #49454f;
+  --md-sys-color-on-surface-variant: #cac4d0;
+  --md-sys-color-surface-container-lowest: #0f0d13;
+  --md-sys-color-surface-container-low: #1d1b20;
+  --md-sys-color-surface-container: #211f26;
+  --md-sys-color-surface-container-high: #2b2930;
+  --md-sys-color-surface-container-highest: #36343b;
+  --md-sys-color-outline: #938f99;
+  --md-sys-color-outline-variant: #49454f;
+  --md-sys-color-error: #f2b8b5;
+  --md-sys-color-on-error: #601410;
+  --md-sys-color-error-container: #8c1d18;
+  --md-sys-color-on-error-container: #ffdad6;
+  --md-sys-color-success: #7fcb9b;
+  --md-sys-color-on-success: #002112;
+  --md-sys-color-success-container: #00522e;
+  --md-sys-color-on-success-container: #d4f1dd;
+  --md-sys-color-background: #1c1b1f;
+  --md-sys-color-on-background: #e6e1e5;
+  --md-sys-color-inverse-surface: #e6e1e5;
+  --md-sys-color-inverse-on-surface: #313033;
+  --md-sys-color-inverse-primary: #1a73e8;
+
+  /* 暗色阴影 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
+
+  /* 暗色毛玻璃 */
+  --glass-bg: rgba(28, 27, 31, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  /* 暗色 Glow Effect */
+  --glow-border: linear-gradient(
+    135deg,
+    rgba(168, 199, 250, 0.3),
+    rgba(168, 199, 250, 0.05)
+  );
 }

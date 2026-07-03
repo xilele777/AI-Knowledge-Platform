@@ -22,11 +22,12 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        redirect: '/docs',
+        redirect: '/dashboard',
       },
       {
         path: 'dashboard',
-        redirect: '/docs',
+        name: 'Dashboard',
+        component: () => import('../views/DashboardView.vue'),
       },
       {
         path: 'docs',

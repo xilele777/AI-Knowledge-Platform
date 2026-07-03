@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
+const MdEditor = defineAsyncComponent(() =>
+  import('md-editor-v3').then((m) => m.MdEditor),
+)
 import {
   addDocumentToKnowledgeBase,
   deleteDocument,

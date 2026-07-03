@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import SharedDocumentCard from './components/SharedDocumentCard.vue'
 import { getSharedDocuments } from '../../api/documents'
 import type { DocumentListItem } from '../../types/document'
+import SkeletonCard from '@/components/shared/SkeletonCard.vue'
+import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -76,17 +78,26 @@ void loadDocuments()
       :closable="false"
     />
 
-    <div v-loading="loading" class="shared-content">
-      <el-empty
-        v-if="!loading && docs.length === 0"
-        description="暂无共享文档，来做第一个分享者吧！"
+    <div class="shared-content">
+      <SkeletonCard v-if="loading" :count="6" variant="card" />
+
+      <EmptyStateActionable
+        v-else-if="!loading && docs.length === 0"
+        icon="share"
+        title="还没有共享文档"
+        description="快去创作一篇文档并分享到共享广场吧"
+        action-text="去创作"
+        @action="$router.push('/docs')"
       />
 
-      <el-row v-else :gutter="16">
-        <el-col v-for="item in docs" :key="item.id" :xs="24" :sm="12" :lg="8">
-          <SharedDocumentCard :item="item" @open="handleOpenDoc" />
-        </el-col>
-      </el-row>
+      <div v-else class="card-grid">
+        <SharedDocumentCard
+          v-for="item in docs"
+          :key="item.id"
+          :item="item"
+          @open="handleOpenDoc"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -125,7 +136,9 @@ void loadDocuments()
   min-height: 240px;
 }
 
-:deep(.el-col) {
-  margin-bottom: 16px;
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
 }
 </style>

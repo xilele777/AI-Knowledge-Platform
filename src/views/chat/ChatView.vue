@@ -1,722 +1,83 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
-import {
-  createChat,
-  createChatMessage,
-  getChatMessages,
-  getKnowledgeChunksForQa,
-  getMyChats,
-  deleteChat,
-} from '../../api/chat'
-import {
-  getMyKnowledgeBases,
-  normalizeKnowledgeQaConfig,
-  updateKnowledgeBaseQaConfig,
-} from '../../api/knowledge'
-
-import { useAiConfigStore } from '../../stores/aiConfig'
-import type {
-  ChatAnswerMode,
-  ChatListItem,
-  ChatMessage,
-  ChatMessageStatus,
-  ChatSourceChunk,
-  KnowledgeChunkForQa,
-} from '../../types/chat'
-import type { KnowledgeBaseListItem, KnowledgeQaConfig } from '../../types/knowledge'
-import {
-  hasValuableRetrievedChunks,
-  retrieveRelevantChunks,
-  type RetrieveChunkInput,
-  type RetrievedChunk,
-} from '../../utils/retrieveChunks'
-import { createEmbedding, findTopSimilarChunks, type SimilarChunk } from '../../utils/vectorEmbedding'
-import { buildGeneralAiPrompt, buildKnowledgeEnhancedPrompt } from '../../utils/buildQaPrompt'
+import { useAiConfigStore } from '@/stores/aiConfig'
+import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
 import ChatInput from './components/ChatInput.vue'
 import ChatMessageList from './components/ChatMessageList.vue'
-import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
-import { track } from '../../utils/tracker'
-import { generateAiTextStream } from '../../api/ai'
+import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
+import { useChatSession } from './composables/useChatSession'
+import { useChatMessages } from './composables/useChatMessages'
 
 const route = useRoute()
 const aiConfigStore = useAiConfigStore()
 
-const loadingChats = ref(false)
-const loadingMessages = ref(false)
-const sending = ref(false)
-const savingQaConfig = ref(false)
-const errorText = ref('')
-const showQaConfigDrawer = ref(false)
+const session = useChatSession()
+const chatMessages = useChatMessages(session)
 
-const knowledgeBases = ref<KnowledgeBaseListItem[]>([])
-const chats = ref<ChatListItem[]>([])
-const messages = ref<ChatMessage[]>([])
+const {
+  knowledgeBases,
+  chats,
+  activeChatId,
+  selectedKnowledgeBaseId,
+  loadingChats,
+  savingQaConfig,
+  errorText,
+  showQaConfigDrawer,
+  hasChats,
+  selectedKnowledgeBaseName,
+  qaConfigForm,
+  qaSummaryText,
+  canSaveQaConfig,
+  loadKnowledgeBases,
+  loadChats,
+  switchChat,
+  resetDraftSession,
+  deleteChatById,
+  applyQaConfigFromSelectedKnowledgeBase,
+  handleSaveQaConfigAsDefault,
+  handleResetQaConfigDraft,
+} = session
 
-const activeChatId = ref('')
-const selectedKnowledgeBaseId = ref('')
-const lastQuestion = ref('')
-const lastQuestionChatId = ref('')
+const {
+  messages,
+  loadingMessages,
+  sending,
+  lastQuestion,
+  lastQuestionChatId,
+  canRegenerate,
+  loadMessages,
+  handleSend,
+  handleRegenerate,
+} = chatMessages
 
-const qaConfigForm = reactive<KnowledgeQaConfig>(normalizeKnowledgeQaConfig(null))
-
-const hasChats = computed(() => chats.value.length > 0)
-const canRegenerate = computed(() => Boolean(lastQuestion.value && lastQuestionChatId.value))
-
-const activeChat = computed(() => chats.value.find((item) => item.id === activeChatId.value) || null)
-
-const selectedKnowledgeBaseName = computed(() => {
-  const found = knowledgeBases.value.find((item) => item.id === selectedKnowledgeBaseId.value)
-  return found?.name || '未选择知识库'
-})
-
-const qaSummaryText = computed(() => {
-  const modeText = qaConfigForm.useKnowledgeEnhanced ? '知识增强优先' : '纯 AI 回答'
-  return modeText
-})
-
-const canSaveQaConfig = computed(() => Boolean(selectedKnowledgeBaseId.value))
-
-function applyQaConfig(config: KnowledgeQaConfig) {
-  const normalized = normalizeKnowledgeQaConfig(config)
-  qaConfigForm.systemPrompt = normalized.systemPrompt
-  qaConfigForm.answerStyle = normalized.answerStyle
-  qaConfigForm.useKnowledgeEnhanced = normalized.useKnowledgeEnhanced
-  qaConfigForm.aiProvider = 'custom'
-  qaConfigForm.customAi.baseUrl = ''
-  qaConfigForm.customAi.apiKey = ''
-  qaConfigForm.customAi.model = ''
+// ─── 切换会话时自动加载消息 ───
+const originalSwitchChat = switchChat
+function switchChatAndLoad(chat: typeof chats.value[number]) {
+  originalSwitchChat(chat)
+  void loadMessages(chat.id)
 }
 
-function applyQaConfigFromSelectedKnowledgeBase() {
-  const selected = knowledgeBases.value.find((item) => item.id === selectedKnowledgeBaseId.value)
-  applyQaConfig(selected?.qaConfig ? selected.qaConfig : normalizeKnowledgeQaConfig(null))
-}
-
-function getQaConfigRuntimeSnapshot(): KnowledgeQaConfig {
-  return normalizeKnowledgeQaConfig({
-    systemPrompt: qaConfigForm.systemPrompt,
-    answerStyle: qaConfigForm.answerStyle,
-    useKnowledgeEnhanced: qaConfigForm.useKnowledgeEnhanced,
-    aiProvider: 'custom',
-    customAi: {
-      baseUrl: '',
-      apiKey: '',
-      model: '',
-    },
-  })
-}
-
-function getQaConfigSaveSnapshot(): KnowledgeQaConfig {
-  return normalizeKnowledgeQaConfig({
-    systemPrompt: qaConfigForm.systemPrompt,
-    answerStyle: qaConfigForm.answerStyle,
-    useKnowledgeEnhanced: qaConfigForm.useKnowledgeEnhanced,
-    aiProvider: 'custom',
-    customAi: {
-      baseUrl: '',
-      apiKey: '',
-      model: '',
-    },
-  })
-}
-
-watch(
-  () => selectedKnowledgeBaseId.value,
-  () => {
-    applyQaConfigFromSelectedKnowledgeBase()
-  },
-)
-
-function formatDate(text: string): string {
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-  return date.toLocaleDateString('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-function toSourceChunks(items: RetrievedChunk<RetrieveChunkInput>[]): ChatSourceChunk[] {
-  return items.map((item) => ({
-    chunkId: String(item.id ?? ''),
-    fileId: typeof item.fileId === 'string' ? item.fileId : null,
-    documentId: typeof item.documentId === 'string' ? item.documentId : null,
-    sourceType: item.sourceType === 'document' ? 'document' : 'file',
-    sourceName: typeof item.sourceName === 'string' ? item.sourceName : null,
-    chunkIndex: typeof item.chunkIndex === 'number' ? item.chunkIndex : null,
-    content: String(item.content ?? ''),
-    score: item.score,
-    matchedKeywords: item.matchedKeywords,
-  }))
-}
-
-function prependOrUpdateChat(chat: ChatListItem) {
-  const without = chats.value.filter((item) => item.id !== chat.id)
-  chats.value = [chat, ...without]
-}
-
-function updateMessageById(messageId: string, updater: (message: ChatMessage) => ChatMessage) {
-  messages.value = messages.value.map((item) => (item.id === messageId ? updater(item) : item))
-}
-
-function appendLocalMessage(message: ChatMessage) {
-  messages.value = [...messages.value, message]
-}
-
-function buildLocalPendingMessage(input: {
-  role: ChatMessage['role']
-  content: string
-  chatId: string
-  status?: ChatMessageStatus
-  sources?: ChatSourceChunk[]
-  answerMode?: ChatAnswerMode | null
-  errorMessage?: string | null
-}): ChatMessage {
-  const now = new Date().toISOString()
-  return {
-    id: 'pending-' + String(Date.now()) + '-' + String(Math.random()),
-    chatId: input.chatId,
-    ownerId: 'pending-owner',
-    role: input.role,
-    content: input.content,
-    sources: input.sources ?? [],
-    answerMode: input.answerMode ?? null,
-    status: input.status ?? 'done',
-    errorMessage: input.errorMessage ?? null,
-    createdAt: now,
-  }
-}
-
-function mapChunksToRetrieveInputs(chunks: KnowledgeChunkForQa[]): RetrieveChunkInput[] {
-  return chunks.map((item) => ({
-    id: item.id,
-    fileId: item.fileId,
-    documentId: item.documentId,
-    sourceType: item.sourceType,
-    sourceName: item.sourceName,
-    chunkIndex: item.chunkIndex,
-    content: item.content,
-  }))
-}
-
-interface PreparedQaRun {
-  mode: ChatAnswerMode
-  prompt: string
-  sources: ChatSourceChunk[]
-  contextChunks: ChatSourceChunk[]
-}
-
-function hasValuableVectorChunks(chunks: RetrievedChunk<RetrieveChunkInput>[]): boolean {
-  if (chunks.length === 0) {
-    return false
-  }
-
-  const topScore = chunks[0]?.score ?? 0
-  const averageScore = chunks.reduce((total, item) => total + item.score, 0) / chunks.length
-
-  return topScore >= 0.2 && averageScore >= 0.12
-}
-
-async function prepareSmartQa(
-  question: string,
-  knowledgeBaseId: string | null,
-  qaConfig: KnowledgeQaConfig,
-): Promise<PreparedQaRun> {
-  let retrieved: RetrievedChunk<RetrieveChunkInput>[] = []
-  let retrievalStrategy: 'none' | 'vector' | 'keyword' = 'none'
-  const shouldRetrieveKnowledge = qaConfig.useKnowledgeEnhanced && Boolean(knowledgeBaseId)
-
-  if (shouldRetrieveKnowledge && knowledgeBaseId) {
-    const chunkResult = await getKnowledgeChunksForQa(knowledgeBaseId, 500)
-
-    if (!chunkResult.success || !chunkResult.data) {
-      throw new Error(chunkResult.error || '查询知识切片失败')
-    }
-
-    const chunks = chunkResult.data
-    const chunksWithEmbeddings = chunks.filter((chunk) => chunk.embedding !== null)
-
-    if (chunksWithEmbeddings.length > 0 && aiConfigStore.isComplete) {
-      try {
-        const config = await aiConfigStore.ensureConfig()
-        const embeddingResult = await createEmbedding(question, config)
-
-        const similarChunks = findTopSimilarChunks(
-          embeddingResult.embedding,
-          chunksWithEmbeddings.map((chunk) => ({
-            item: chunk,
-            embedding: chunk.embedding as number[],
-          })),
-          5,
-          0.1,
-        )
-
-        retrieved = similarChunks.map((result: SimilarChunk<KnowledgeChunkForQa>) => ({
-          id: result.item.id,
-          fileId: result.item.fileId,
-          documentId: result.item.documentId,
-          sourceType: result.item.sourceType,
-          sourceName: result.item.sourceName,
-          chunkIndex: result.item.chunkIndex,
-          content: result.item.content,
-          score: result.similarity,
-          hitCount: 0,
-          matchedKeywords: [],
-        }))
-        if (retrieved.length > 0) {
-          retrievalStrategy = 'vector'
-        }
-      } catch (error) {
-        console.warn('[chat.prepareSmartQa] embedding retrieval failed, fallback to keyword retrieval:', error)
-      }
-    }
-
-    if (retrievalStrategy !== 'vector' || !hasValuableVectorChunks(retrieved)) {
-      retrieved = retrieveRelevantChunks(question, mapChunksToRetrieveInputs(chunks), {
-        topK: 5,
-        minScore: 0.03,
-      })
-      retrievalStrategy = retrieved.length > 0 ? 'keyword' : 'none'
-    }
-  }
-
-  const hasValuableSources =
-    retrievalStrategy === 'vector'
-      ? hasValuableVectorChunks(retrieved)
-      : hasValuableRetrievedChunks(retrieved, {
-          minTopScore: 0.1,
-          minHitCount: 2,
-          minAverageScore: 0.06,
-        })
-
-  const useKnowledgeEnhancedMode = shouldRetrieveKnowledge && hasValuableSources
-  const mode: ChatAnswerMode = useKnowledgeEnhancedMode ? 'knowledge-enhanced' : 'general-ai'
-  const usedChunks = hasValuableSources ? retrieved : []
-
-  const prompt =
-    mode === 'knowledge-enhanced'
-      ? buildKnowledgeEnhancedPrompt(question, usedChunks, {
-          systemInstruction: qaConfig.systemPrompt || undefined,
-          answerStyle: qaConfig.answerStyle || undefined,
-        })
-      : buildGeneralAiPrompt(question, {
-          systemInstruction: qaConfig.systemPrompt || undefined,
-          answerStyle: qaConfig.answerStyle || undefined,
-        })
-
-  const sources = toSourceChunks(usedChunks)
-
-  return {
-    mode,
-    prompt,
-    sources,
-    contextChunks: sources,
-  }
-}
-
-async function loadKnowledgeBases() {
-  const result = await getMyKnowledgeBases()
-
-  if (!result.success || !result.data) {
-    throw new Error(result.error || '获取知识库失败')
-  }
-
-  knowledgeBases.value = result.data
-}
-
-async function loadChats() {
-  loadingChats.value = true
-
-  try {
-    const result = await getMyChats(100)
-
-    if (!result.success) {
-      throw new Error(result.error || '获取会话列表失败')
-    }
-
-    chats.value = result.data || []
-
-    if (!activeChatId.value && chats.value.length > 0) {
-      activeChatId.value = chats.value[0].id
-    }
-  } finally {
-    loadingChats.value = false
-  }
-}
-
-async function loadMessages(chatId: string) {
-  if (!chatId) {
-    messages.value = []
-    return
-  }
-
-  loadingMessages.value = true
-
-  try {
-    const result = await getChatMessages(chatId)
-
-    if (!result.success) {
-      throw new Error(result.error || '获取消息失败')
-    }
-
-    messages.value = result.data || []
-  } finally {
-    loadingMessages.value = false
-  }
-}
-
-function resetDraftSession() {
-  activeChatId.value = ''
-  messages.value = []
-  errorText.value = ''
-}
-
-async function switchChat(chat: ChatListItem) {
-  activeChatId.value = chat.id
-  if (chat.knowledgeBaseId) {
-    selectedKnowledgeBaseId.value = chat.knowledgeBaseId
-  }
-  await loadMessages(chat.id)
-}
-
-async function ensureActiveChat(question: string): Promise<string> {
-  if (activeChatId.value) {
-    return activeChatId.value
-  }
-
-  const created = await createChat({
-    knowledgeBaseId: selectedKnowledgeBaseId.value || null,
-    title: question,
-  })
-
-  if (!created.success || !created.data) {
-    throw new Error(created.error || '创建会话失败')
-  }
-
-  activeChatId.value = created.data.id
-
-  prependOrUpdateChat({
-    id: created.data.id,
-    knowledgeBaseId: created.data.knowledgeBaseId,
-    title: created.data.title,
-    createdAt: created.data.createdAt,
-    updatedAt: created.data.updatedAt,
-  })
-
-  return created.data.id
-}
-
-async function persistAssistantFinal(input: {
-  chatId: string
-  localMessageId: string
-  content: string
-  mode: ChatAnswerMode
-  sources: ChatSourceChunk[]
-  status: ChatMessageStatus
-  errorMessage: string | null
-}) {
-  const contentToSave = input.content.trim() || (input.status === 'error' ? '生成未完成' : '')
-
-  if (!contentToSave) {
-    return null
-  }
-
-  const assistantSaved = await createChatMessage({
-    chatId: input.chatId,
-    role: 'assistant',
-    content: contentToSave,
-    sources: input.sources,
-    answerMode: input.mode,
-    status: input.status,
-    errorMessage: input.errorMessage,
-  })
-
-  if (!assistantSaved.success || !assistantSaved.data) {
-    throw new Error(assistantSaved.error || '保存 AI 消息失败')
-  }
-
-  messages.value = messages.value.map((item) =>
-    item.id === input.localMessageId ? assistantSaved.data! : item,
-  )
-
-  return assistantSaved.data
-}
-
-async function callAssistantAnswer(input: {
-  chatId: string
-  question: string
-  qaConfig: KnowledgeQaConfig
-  trackQuestionLength?: number
-}) {
-  const prepared = await prepareSmartQa(
-    input.question,
-    selectedKnowledgeBaseId.value || null,
-    input.qaConfig,
-  )
-
-  const localAssistantMessage = buildLocalPendingMessage({
-    role: 'assistant',
-    content: '',
-    chatId: input.chatId,
-    status: 'streaming',
-    sources: prepared.sources,
-    answerMode: prepared.mode,
-  })
-
-  appendLocalMessage(localAssistantMessage)
-
-  let finalText = ''
-  let finalStatus: ChatMessageStatus = 'done'
-  let finalErrorMessage: string | null = null
-
-  try {
-    const config = await aiConfigStore.ensureConfig()
-    if (!aiConfigStore.isComplete) {
-      throw new Error(`请先在个人中心配置 AI API 信息：${aiConfigStore.missingFields.join('、')}`)
-    }
-
-    const result = await generateAiTextStream(
-      { userPrompt: prepared.prompt },
-      config,
-      (chunk) => {
-        finalText += chunk
-        updateMessageById(localAssistantMessage.id, (message) => ({
-          ...message,
-          content: finalText,
-        }))
-      }
-    )
-
-    if (!result.success) {
-      finalStatus = 'error'
-      finalErrorMessage = result.error || 'AI 回答失败'
-    } else {
-      finalStatus = 'done'
-    }
-  } catch (error) {
-    finalStatus = 'error'
-    finalErrorMessage = error instanceof Error ? error.message : 'AI 回答失败'
-  }
-
-  if (finalStatus === 'error' && !finalText.trim()) {
-    finalText = 'AI 回答失败，请检查配置或稍后重试。'
-  }
-
-  updateMessageById(localAssistantMessage.id, (message) => ({
-    ...message,
-    content: finalText,
-    status: finalStatus,
-    errorMessage: finalErrorMessage,
-  }))
-
-  const savedAssistant = await persistAssistantFinal({
-    chatId: input.chatId,
-    localMessageId: localAssistantMessage.id,
-    content: finalText,
-    mode: prepared.mode,
-    sources: prepared.sources,
-    status: finalStatus,
-    errorMessage: finalErrorMessage,
-  })
-
-  const title = input.question.length <= 20 ? input.question : input.question.slice(0, 20) + '...'
-  const updatedAt = savedAssistant?.createdAt || new Date().toISOString()
-
-  prependOrUpdateChat({
-    id: input.chatId,
-    knowledgeBaseId: selectedKnowledgeBaseId.value,
-    title,
-    createdAt: activeChat.value?.createdAt || updatedAt,
-    updatedAt,
-  })
-
-  if (finalStatus === 'done') {
-    void track(ANALYTICS_EVENTS.QA_SEND, {
-      chat_id: input.chatId,
-      knowledge_base_id: selectedKnowledgeBaseId.value || null,
-      question_length: input.trackQuestionLength ?? input.question.length,
-      qa_mode: prepared.mode,
-      qa_ai_provider: input.qaConfig.aiProvider,
-      qa_use_knowledge_enhanced: input.qaConfig.useKnowledgeEnhanced,
-      source_count: prepared.sources.length,
-      answer_length: finalText.length,
-      model: '',
-      total_tokens: null,
-    })
-  }
-
-  if (finalStatus === 'error') {
-    ElMessage.error(finalErrorMessage || 'AI 回答失败')
-  }
-}
-
-async function handleSend(question: string) {
-  if (sending.value) {
-    return
-  }
-
-  sending.value = true
-  errorText.value = ''
-
-  try {
-    const chatId = await ensureActiveChat(question)
-
-    const localUserMessage = buildLocalPendingMessage({
-      role: 'user',
-      content: question,
-      chatId,
-      status: 'done',
-    })
-    appendLocalMessage(localUserMessage)
-
-    const userSaved = await createChatMessage({
-      chatId,
-      role: 'user',
-      content: question,
-      status: 'done',
-    })
-
-    if (!userSaved.success || !userSaved.data) {
-      throw new Error(userSaved.error || '保存用户消息失败')
-    }
-
-    messages.value = messages.value.map((item) => (item.id === localUserMessage.id ? userSaved.data! : item))
-
-    lastQuestion.value = question
-    lastQuestionChatId.value = chatId
-
-    const qaConfigSnapshot = getQaConfigRuntimeSnapshot()
-    await callAssistantAnswer({
-      chatId,
-      question,
-      qaConfig: qaConfigSnapshot,
-      trackQuestionLength: question.length,
-    })
-  } catch (error) {
-    errorText.value = error instanceof Error ? error.message : '发送失败，请稍后重试'
-    ElMessage.error(errorText.value)
-  } finally {
-    sending.value = false
-  }
-}
-
-async function handleRegenerate() {
-  if (sending.value) {
-    return
-  }
-
-  if (!lastQuestion.value || !lastQuestionChatId.value) {
-    ElMessage.warning('暂无可重新生成的问题')
-    return
-  }
-
-  const chatId = activeChatId.value || lastQuestionChatId.value
-  if (!chatId) {
-    ElMessage.warning('当前无可用会话')
-    return
-  }
-
-  sending.value = true
-  errorText.value = ''
-
-  try {
-    const qaConfigSnapshot = getQaConfigRuntimeSnapshot()
-    await callAssistantAnswer({
-      chatId,
-      question: lastQuestion.value,
-      qaConfig: qaConfigSnapshot,
-    })
-  } catch (error) {
-    errorText.value = error instanceof Error ? error.message : '重新生成失败'
-    ElMessage.error(errorText.value)
-  } finally {
-    sending.value = false
-  }
-}
-
-async function handleSaveQaConfigAsDefault() {
-  if (!selectedKnowledgeBaseId.value) {
-    ElMessage.warning('请先选择知识库')
-    return
-  }
-
-  savingQaConfig.value = true
-
-  try {
-    const config = getQaConfigSaveSnapshot()
-    const result = await updateKnowledgeBaseQaConfig(selectedKnowledgeBaseId.value, config)
-
-    if (!result.success || !result.data) {
-      throw new Error(result.error || '保存问答配置失败')
-    }
-
-    const savedConfig = normalizeKnowledgeQaConfig(result.data)
-
-    knowledgeBases.value = knowledgeBases.value.map((item) => {
-      if (item.id !== selectedKnowledgeBaseId.value) {
-        return item
-      }
-      return {
-        ...item,
-        qaConfig: savedConfig,
-      }
-    })
-
-    ElMessage.success('已保存为当前知识库默认问答配置')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存问答配置失败')
-  } finally {
-    savingQaConfig.value = false
-  }
-}
-
+// ─── 删除会话时清理关联状态 ───
 async function handleDeleteChat(chatId: string, event: Event) {
   event.stopPropagation()
-  
-  try {
-    const confirmed = await new Promise((resolve) => {
-      ElMessageBox.confirm('确定要删除这个会话吗？删除后无法恢复。', '删除确认', {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }).then(() => resolve(true)).catch(() => resolve(false))
-    })
-
-    if (!confirmed) {
-      return
-    }
-
-    const result = await deleteChat(chatId)
-    if (!result.success) {
-      throw new Error(result.error || '删除失败')
-    }
-
-    if (chatId === activeChatId.value) {
-      activeChatId.value = ''
-      messages.value = []
-      lastQuestion.value = ''
-      lastQuestionChatId.value = ''
-    }
-
-    chats.value = chats.value.filter((chat) => chat.id !== chatId)
-
-    ElMessage.success('会话已删除')
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(error instanceof Error ? error.message : '删除失败，请稍后重试')
-    }
+  const success = await deleteChatById(chatId)
+  if (success && chatId === activeChatId.value) {
+    messages.value = []
+    lastQuestion.value = ''
+    lastQuestionChatId.value = ''
   }
 }
 
-function handleResetQaConfigDraft() {
-  applyQaConfigFromSelectedKnowledgeBase()
+// ─── 格式化日期 ───
+function formatDate(text: string): string {
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
+// ─── 初始化 ───
 async function bootstrap() {
   try {
     errorText.value = ''
@@ -738,7 +99,6 @@ async function bootstrap() {
       if (active?.knowledgeBaseId) {
         selectedKnowledgeBaseId.value = active.knowledgeBaseId
       }
-
       applyQaConfigFromSelectedKnowledgeBase()
 
       const latestUser = [...messages.value].reverse().find((item) => item.role === 'user')
@@ -754,6 +114,12 @@ async function bootstrap() {
 
 onMounted(() => {
   void bootstrap()
+})
+
+// ─── 键盘快捷键 ───
+useKeyboardShortcut({
+  'ctrl+n': () => resetDraftSession(),
+  'escape': () => { showQaConfigDrawer.value = false },
 })
 </script>
 
@@ -784,16 +150,21 @@ onMounted(() => {
         </div>
 
         <div class="chat-list" v-loading="loadingChats">
-          <div v-if="!hasChats && !loadingChats" class="empty-chats">
-            暂无历史对话
-          </div>
+          <EmptyStateActionable
+            v-if="!hasChats && !loadingChats"
+            icon="empty-chat"
+            title="还没有对话"
+            description="选择知识库，输入你的第一个问题"
+            action-text="开始对话"
+            :show-action="false"
+          />
 
           <div
             v-for="chat in chats"
             :key="chat.id"
             class="chat-item"
             :class="{ active: chat.id === activeChatId }"
-            @click="switchChat(chat)"
+            @click="switchChatAndLoad(chat)"
           >
             <div class="chat-item-content">
               <div class="chat-title">{{ chat.title }}</div>

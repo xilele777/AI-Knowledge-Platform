@@ -4,6 +4,7 @@ import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import { UserFilled } from '@element-plus/icons-vue'
 import type { ChatMessage } from '../../../types/chat'
+import SvgIcon from '@/components/shared/SvgIcon.vue'
 
 interface Props {
   messages: ChatMessage[]
@@ -43,7 +44,9 @@ function parseMessageContent(content: string) {
 <template>
   <div class="message-list">
     <div v-if="!rows.length && !loading" class="empty-state">
-      <div class="empty-icon">💬</div>
+      <div class="empty-icon">
+          <SvgIcon name="empty-chat" :size="48" color="var(--md-sys-color-outline)" />
+        </div>
       <div class="empty-text">开始对话</div>
       <div class="empty-subtext">输入问题，AI 将为您解答</div>
     </div>
@@ -107,9 +110,11 @@ function parseMessageContent(content: string) {
 }
 
 .empty-icon {
-  font-size: 48px;
   margin-bottom: 16px;
   opacity: 0.5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .empty-text {
