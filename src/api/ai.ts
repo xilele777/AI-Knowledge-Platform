@@ -261,8 +261,9 @@ export async function generateAiText(
       return fail('用户提示不能为空')
     }
 
+    const { signal: _signal, ...requestParams } = params
     const payload = await invokeEdgeFunction<OpenAiChatCompletionResponse>('ai-chat', {
-      params,
+      params: requestParams,
       stream: false,
     })
     const choice = payload?.choices?.[0]
@@ -296,14 +297,15 @@ export async function generateAiTextStream(
       return fail('用户提示不能为空')
     }
 
+    const { signal, ...requestParams } = params
     const response = await fetchEdgeFunctionStream(
       'ai-chat',
       {
-        params,
+        params: requestParams,
         stream: true,
       },
       {
-        signal: params.signal,
+        signal,
       },
     )
 

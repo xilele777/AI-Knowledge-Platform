@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
-import { UserFilled } from '@element-plus/icons-vue'
+import { ArrowDown, UserFilled } from '@element-plus/icons-vue'
 import type { ChatMessage } from '../../../types/chat'
 import SvgIcon from '@/components/shared/SvgIcon.vue'
+import AssistantMarkdown from './AssistantMarkdown.vue'
+import SourceChunks from './SourceChunks.vue'
+import { extractCitations } from '@/utils/parseCitations'
+import { splitThinkContent, stripLegacyThinkPrefix } from '@/utils/streamingThinkParser'
 
 interface Props {
   messages: ChatMessage[]
@@ -14,6 +18,67 @@ interface Props {
 const props = defineProps<Props>()
 
 const rows = computed(() => props.messages || [])
+
+// ─── 自动滚动与用户手动滚动的冲突处理 ───
+// 规则：默认吸附底部跟随流式输出；用户上滑离开底部即解除吸附，
+// 手动回到底部（或点击悬浮按钮）后恢复跟随。
+const PIN_THRESHOLD_PX = 48
+
+const scrollContainer = ref<HTMLElement | null>(null)
+const isPinnedToBottom = ref(true)
+
+const showBackToBottom = computed(() => !isPinnedToBottom.value && rows.value.length > 0)
+
+function handleScroll() {
+  const el = scrollContainer.value
+  if (!el) {
+    return
+  }
+
+  const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  isPinnedToBottom.value = distanceToBottom <= PIN_THRESHOLD_PX
+}
+
+function scrollToBottom(behavior: ScrollBehavior = 'auto') {
+  const el = scrollContainer.value
+  if (!el) {
+    return
+  }
+
+  el.scrollTo({ top: el.scrollHeight, behavior })
+}
+
+function backToBottom() {
+  isPinnedToBottom.value = true
+  scrollToBottom('smooth')
+}
+
+// 内容变化（新消息 / 流式追加）时，仅在吸附状态下跟随
+watch(
+  () => {
+    const last = rows.value[rows.value.length - 1]
+    return `${rows.value.length}:${last?.id ?? ''}:${last?.content.length ?? 0}`
+  },
+  async () => {
+    if (!isPinnedToBottom.value) {
+      return
+    }
+    await nextTick()
+    scrollToBottom()
+  },
+)
+
+// 会话切换（loading 结束）时重置吸附并滚到底部
+watch(
+  () => props.loading,
+  async (loading, wasLoading) => {
+    if (wasLoading && !loading) {
+      isPinnedToBottom.value = true
+      await nextTick()
+      scrollToBottom()
+    }
+  },
+)
 
 function formatTime(text: string): string {
   const date = new Date(text)
@@ -26,24 +91,96 @@ function formatTime(text: string): string {
   })
 }
 
-function parseMessageContent(content: string) {
-  let answer = content
-  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
-  if (thinkMatch) {
-    answer = content.slice(thinkMatch.index! + thinkMatch[0].length).trim()
+// ─── 消息内容分流 + 引用溯源 ───
+// <think> 推理块流式分流到可折叠面板（思考中实时展开，闭合后自动收起）；
+// 回答末尾「参考片段: [片段x,片段y]」解析为可点击角标，
+// 点击展开来源面板并定位高亮对应切片，形成检索→生成→溯源的可验证闭环。
+interface AssistantView {
+  body: string
+  citedIndices: number[]
+  thinking: string
+  thinkOpen: boolean
+}
+
+const assistantViews = computed(() => {
+  const map = new Map<string, AssistantView>()
+
+  for (const item of rows.value) {
+    if (item.role !== 'assistant') {
+      continue
+    }
+
+    const { thinking, answer, thinkOpen } = splitThinkContent(item.content)
+    // 无 <think> 标签时兼容「思考：…回答：…」前缀风格
+    const displayAnswer = thinking || thinkOpen ? answer : stripLegacyThinkPrefix(answer)
+
+    if (item.status !== 'done' || !item.sources.length) {
+      map.set(item.id, { body: displayAnswer, citedIndices: [], thinking, thinkOpen })
+      continue
+    }
+
+    const { body, citedIndices } = extractCitations(displayAnswer)
+    // 过滤模型幻觉出的越界序号；全部越界时保留原文（不剥离引用行）
+    const valid = citedIndices.filter((index) => index <= item.sources.length)
+    map.set(
+      item.id,
+      valid.length
+        ? { body, citedIndices: valid, thinking, thinkOpen }
+        : { body: displayAnswer, citedIndices: [], thinking, thinkOpen },
+    )
   }
-  const thinkRegex = /^(?:思考|思考过程|thinking|reasoning)[:：]\s*([\s\S]*?)(?=\n\s*(?:回答|输出|answer|output)[:：]|$)/i
-  const thinkMatch2 = content.match(thinkRegex)
-  if (thinkMatch2 && !thinkMatch) {
-    answer = content.slice(thinkMatch2.index! + thinkMatch2[0].length).trim()
-  }
-  return answer
+
+  return map
+})
+
+function viewFor(item: ChatMessage): AssistantView {
+  return (
+    assistantViews.value.get(item.id) ?? {
+      body: item.content,
+      citedIndices: [],
+      thinking: '',
+      thinkOpen: false,
+    }
+  )
+}
+
+// 思考面板展开状态：用户手动切换优先；未操作过时跟随思考进行状态
+// （流式思考中自动展开，</think> 到达后自动收起）
+const thinkExpanded = ref<Record<string, boolean>>({})
+
+function isThinkExpanded(item: ChatMessage): boolean {
+  return thinkExpanded.value[item.id] ?? viewFor(item).thinkOpen
+}
+
+function toggleThink(item: ChatMessage) {
+  thinkExpanded.value[item.id] = !isThinkExpanded(item)
+}
+
+const expandedSources = ref<Record<string, boolean>>({})
+const highlightTarget = ref<{ messageId: string; index: number } | null>(null)
+
+function toggleSources(id: string) {
+  expandedSources.value[id] = !expandedSources.value[id]
+}
+
+function highlightFor(id: string): number | null {
+  return highlightTarget.value?.messageId === id ? highlightTarget.value.index : null
+}
+
+async function locateSource(messageId: string, index: number) {
+  expandedSources.value[messageId] = true
+  await nextTick()
+  // 先清空再赋值：连续点击同一角标也能重新触发面板内的高亮 watch
+  highlightTarget.value = null
+  await nextTick()
+  highlightTarget.value = { messageId, index }
 }
 </script>
 
 <template>
-  <div class="message-list">
-    <div v-if="!rows.length && !loading" class="empty-state">
+  <div class="message-list-wrapper">
+    <div ref="scrollContainer" class="message-list" @scroll.passive="handleScroll">
+      <div v-if="!rows.length && !loading" class="empty-state">
       <div class="empty-icon">
           <SvgIcon name="empty-chat" :size="48" color="var(--md-sys-color-outline)" />
         </div>
@@ -70,9 +207,63 @@ function parseMessageContent(content: string) {
             <span class="time">{{ formatTime(item.createdAt) }}</span>
           </div>
 
-          <div class="message-content" :class="item.role">
-            <MdPreview :model-value="item.role === 'assistant' ? parseMessageContent(item.content) : item.content" />
+          <!-- 思考过程（推理模型 <think> 块）：思考中实时展开，闭合后自动收起 -->
+          <div
+            v-if="item.role === 'assistant' && (viewFor(item).thinking || viewFor(item).thinkOpen)"
+            class="think-block"
+          >
+            <button type="button" class="think-toggle" @click="toggleThink(item)">
+              <el-icon :size="12" class="toggle-icon" :class="{ expanded: isThinkExpanded(item) }">
+                <ArrowDown />
+              </el-icon>
+              <span :class="{ 'think-pulsing': viewFor(item).thinkOpen }">
+                {{ viewFor(item).thinkOpen ? '思考中…' : '思考过程' }}
+              </span>
+            </button>
+            <pre v-show="isThinkExpanded(item)" class="think-content">{{ viewFor(item).thinking }}</pre>
           </div>
+
+          <div class="message-content" :class="item.role">
+            <AssistantMarkdown
+              v-if="item.role === 'assistant'"
+              :content="viewFor(item).body"
+              :streaming="item.status === 'streaming'"
+            />
+            <MdPreview v-else :model-value="item.content" />
+          </div>
+
+          <!-- 引用角标：点击定位到对应来源切片 -->
+          <div
+            v-if="item.role === 'assistant' && viewFor(item).citedIndices.length"
+            class="citation-row"
+          >
+            <span class="citation-label">引用</span>
+            <button
+              v-for="ci in viewFor(item).citedIndices"
+              :key="ci"
+              type="button"
+              class="citation-chip"
+              @click="locateSource(item.id, ci)"
+            >
+              片段{{ ci }}
+            </button>
+          </div>
+
+          <!-- 参考来源面板 -->
+          <template v-if="item.role === 'assistant' && item.sources.length > 0 && item.status !== 'streaming'">
+            <button type="button" class="sources-toggle" @click="toggleSources(item.id)">
+              <el-icon :size="12" class="toggle-icon" :class="{ expanded: !!expandedSources[item.id] }">
+                <ArrowDown />
+              </el-icon>
+              参考来源（{{ item.sources.length }}）
+            </button>
+            <SourceChunks
+              v-if="expandedSources[item.id]"
+              :chunks="item.sources"
+              :cited-indices="viewFor(item).citedIndices"
+              :highlight-index="highlightFor(item.id)"
+            />
+          </template>
 
           <!-- 生成中状态 -->
           <div v-if="item.role === 'assistant' && item.status === 'streaming'" class="streaming-indicator">
@@ -89,14 +280,63 @@ function parseMessageContent(content: string) {
         </div>
       </div>
     </div>
+    </div>
+
+    <Transition name="fade-up">
+      <button v-if="showBackToBottom" class="back-to-bottom" type="button" @click="backToBottom">
+        <el-icon :size="14"><ArrowDown /></el-icon>
+        <span>回到底部</span>
+      </button>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
+.message-list-wrapper {
+  position: relative;
+  height: 100%;
+}
+
 .message-list {
   height: 100%;
   overflow-y: auto;
   padding: 24px;
+}
+
+/* ---------- 回到底部 ---------- */
+.back-to-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 9999px;
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-medium);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.back-to-bottom:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.fade-up-enter-active,
+.fade-up-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-up-enter-from,
+.fade-up-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 
 /* ---------- 空状态 ---------- */
@@ -363,6 +603,111 @@ function parseMessageContent(content: string) {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* ---------- 思考过程 ---------- */
+.think-block {
+  margin-bottom: 6px;
+}
+
+.think-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 6px;
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.think-toggle:hover {
+  background: var(--md-sys-color-surface-container);
+}
+
+.think-pulsing {
+  animation: think-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes think-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.think-content {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: 0 8px 8px 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-small);
+  font-family: inherit;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* ---------- 引用溯源 ---------- */
+.citation-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.citation-label {
+  font-size: var(--md-sys-typescale-label-small);
+  color: var(--md-sys-color-outline);
+}
+
+.citation-chip {
+  padding: 2px 10px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 9999px;
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-small);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.citation-chip:hover {
+  background: var(--md-sys-color-surface-container);
+  border-color: var(--md-sys-color-primary);
+}
+
+.sources-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.sources-toggle:hover {
+  background: var(--md-sys-color-surface-container);
+}
+
+.toggle-icon {
+  transition: transform 0.2s ease;
+}
+
+.toggle-icon.expanded {
+  transform: rotate(180deg);
 }
 
 /* ---------- 错误 ---------- */

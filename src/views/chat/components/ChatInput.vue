@@ -10,6 +10,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   (event: 'send', value: string): void
   (event: 'regenerate'): void
+  (event: 'stop'): void
 }>()
 
 const text = ref('')
@@ -50,7 +51,8 @@ function onKeydown(event: KeyboardEvent) {
       <span class="tip">请先在个人中心配置 AI API 信息。</span>
       <div class="actions">
         <el-button :disabled="loading || !canRegenerate" @click="emit('regenerate')">重新生成</el-button>
-        <el-button type="primary" :loading="loading" @click="send">发送</el-button>
+        <el-button v-if="loading" type="danger" plain @click="emit('stop')">停止生成</el-button>
+        <el-button v-else type="primary" @click="send">发送</el-button>
       </div>
     </div>
   </div>

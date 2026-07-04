@@ -16,7 +16,7 @@ import { onUnmounted } from 'vue'
  * <input @input="e => debouncedFn(e.target.value)" />
  * ```
  */
-export function useDebounce<T extends (...args: any[]) => any>(
+export function useDebounce<T extends (...args: never[]) => unknown>(
   fn: T,
   delay = 300,
 ) {

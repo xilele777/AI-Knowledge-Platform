@@ -4,6 +4,7 @@ import { resolveUserAiConfig } from '../_shared/aiConfig.ts'
 type AiGenerateTextParams = {
   systemPrompt?: string
   userPrompt?: string
+  history?: Array<{ role?: string; content?: string }>
   temperature?: number
   maxTokens?: number
   topP?: number
@@ -16,13 +17,42 @@ type ChatRequestBody = {
   stream?: boolean
 }
 
+// 服务端防御性上限：即使客户端裁剪失效，也不放任意长的历史打到上游。
+const MAX_HISTORY_MESSAGES = 20
+const MAX_HISTORY_TOTAL_CHARS = 24000
+
+function sanitizeHistory(history: AiGenerateTextParams['history']) {
+  const items = Array.isArray(history) ? history.slice(-MAX_HISTORY_MESSAGES) : []
+  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
+  let totalChars = 0
+
+  for (const item of items) {
+    const role = item?.role
+    const content = typeof item?.content === 'string' ? item.content.trim() : ''
+
+    if ((role !== 'user' && role !== 'assistant') || !content) {
+      continue
+    }
+
+    totalChars += content.length
+    if (totalChars > MAX_HISTORY_TOTAL_CHARS) {
+      break
+    }
+
+    messages.push({ role, content })
+  }
+
+  return messages
+}
+
 function buildMessages(params: AiGenerateTextParams) {
-  const messages: Array<{ role: 'system' | 'user'; content: string }> = []
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
 
   if (params.systemPrompt?.trim()) {
     messages.push({ role: 'system', content: params.systemPrompt.trim() })
   }
 
+  messages.push(...sanitizeHistory(params.history))
   messages.push({ role: 'user', content: params.userPrompt?.trim() || '' })
   return messages
 }

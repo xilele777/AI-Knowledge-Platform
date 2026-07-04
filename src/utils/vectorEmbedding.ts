@@ -1,14 +1,11 @@
 import type { AiResolvedConfig } from './aiConfig'
 import { invokeEdgeFunction } from './serverProxy'
 
+// 纯计算部分位于 similarity.ts（与 Web Worker 共享），此处 re-export 保持旧引用兼容
+export { cosineSimilarity, findTopSimilarChunks, type SimilarChunk } from './similarity'
+
 export interface EmbeddingResult {
   embedding: number[]
-}
-
-export interface SimilarChunk<T> {
-  item: T
-  embedding: number[]
-  similarity: number
 }
 
 type EmbeddingApiItem = {
@@ -75,44 +72,3 @@ export async function createBatchEmbeddings(
   return requestEmbeddings(texts, config)
 }
 
-export function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (vecA.length !== vecB.length) {
-    throw new Error('Vectors must have the same length')
-  }
-
-  let dotProduct = 0
-  let normA = 0
-  let normB = 0
-
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i]
-    normA += vecA[i] * vecA[i]
-    normB += vecB[i] * vecB[i]
-  }
-
-  if (normA === 0 || normB === 0) {
-    return 0
-  }
-
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
-}
-
-export function findTopSimilarChunks<T>(
-  queryEmbedding: number[],
-  chunks: Array<{ item: T; embedding: number[] }>,
-  topK: number = 5,
-  minSimilarity: number = 0.0,
-): SimilarChunk<T>[] {
-  const results = chunks
-    .filter(({ embedding }) => embedding.length === queryEmbedding.length)
-    .map(({ item, embedding }) => ({
-      item,
-      embedding,
-      similarity: cosineSimilarity(queryEmbedding, embedding),
-    }))
-    .filter((chunk) => chunk.similarity >= minSimilarity)
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, topK)
-
-  return results
-}

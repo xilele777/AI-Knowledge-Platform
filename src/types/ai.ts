@@ -8,9 +8,16 @@ export interface UserAiConfig {
   updatedAt?: string
 }
 
+export interface AiChatHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface AiGenerateTextParams {
   systemPrompt?: string
   userPrompt: string
+  /** 多轮对话历史（按时间正序，不含当前问题），由 chatHistory 工具裁剪后传入 */
+  history?: AiChatHistoryMessage[]
   temperature?: number
   maxTokens?: number
   topP?: number

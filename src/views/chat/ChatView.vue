@@ -51,6 +51,7 @@ const {
   loadMessages,
   handleSend,
   handleRegenerate,
+  handleStop,
 } = chatMessages
 
 // ─── 切换会话时自动加载消息 ───
@@ -210,6 +211,7 @@ useKeyboardShortcut({
             :can-regenerate="canRegenerate"
             @send="handleSend"
             @regenerate="handleRegenerate"
+            @stop="handleStop"
           />
         </div>
       </main>

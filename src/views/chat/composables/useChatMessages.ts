@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 import {
   createChatMessage,
   getChatMessages,
-  getKnowledgeChunksForQa,
+  getKnowledgeChunksForQaCached,
 } from '@/api/chat'
 import { generateAiTextStream } from '@/api/ai'
 import { useAiConfigStore } from '@/stores/aiConfig'
@@ -11,12 +11,20 @@ import { track } from '@/utils/tracker'
 import { ANALYTICS_EVENTS } from '@/constants/analyticsEvents'
 import {
   hasValuableRetrievedChunks,
-  retrieveRelevantChunks,
   type RetrieveChunkInput,
   type RetrievedChunk,
 } from '@/utils/retrieveChunks'
-import { createEmbedding, findTopSimilarChunks, type SimilarChunk } from '@/utils/vectorEmbedding'
+import { createEmbedding } from '@/utils/vectorEmbedding'
+import {
+  findTopSimilarIndicesAsync,
+  retrieveRelevantChunksAsync,
+} from '@/utils/retrievalWorkerClient'
+import { fuseRetrievedChunks } from '@/utils/fuseRetrieval'
+import { rewriteQuestionForRetrieval, shouldRewriteQuestion } from '@/utils/rewriteQuestion'
+import { startQaTimeline } from '@/utils/perfMetrics'
+import type { AiChatHistoryMessage } from '@/types/ai'
 import { buildGeneralAiPrompt, buildKnowledgeEnhancedPrompt } from '@/utils/buildQaPrompt'
+import { buildChatHistory, takeMessagesBeforeLastQuestion } from '@/utils/chatHistory'
 import type {
   ChatAnswerMode,
   ChatMessage,
@@ -55,6 +63,7 @@ export interface UseChatMessagesReturn {
   loadMessages: (chatId: string) => Promise<void>
   handleSend: (question: string) => Promise<void>
   handleRegenerate: () => Promise<void>
+  handleStop: () => void
 }
 
 // ─── 工具函数（从 ChatView 提取） ───
@@ -133,6 +142,7 @@ export function useChatMessages(session: ChatSessionRefs) {
   const sending = ref(false)
   const lastQuestion = ref('')
   const lastQuestionChatId = ref('')
+  let activeAbortController: AbortController | null = null
 
   const canRegenerate = computed(() => Boolean(lastQuestion.value && lastQuestionChatId.value))
 
@@ -169,70 +179,114 @@ export function useChatMessages(session: ChatSessionRefs) {
     question: string,
     knowledgeBaseId: string | null,
     qaConfig: KnowledgeQaConfig,
+    history: AiChatHistoryMessage[] = [],
   ): Promise<PreparedQaRun> {
     let retrieved: RetrievedChunk<RetrieveChunkInput>[] = []
-    let retrievalStrategy: 'none' | 'vector' | 'keyword' = 'none'
+    let vectorValuable = false
+    let keywordValuable = false
     const shouldRetrieveKnowledge = qaConfig.useKnowledgeEnhanced && Boolean(knowledgeBaseId)
 
     if (shouldRetrieveKnowledge && knowledgeBaseId) {
-      const chunkResult = await getKnowledgeChunksForQa(knowledgeBaseId, 500)
+      // 多轮指代消解：追问句（「那它怎么部署？」）直接检索会失效，
+      // 满足触发条件时先用一次低成本 LLM 调用改写为自包含问题。
+      // 改写只用于检索，展示与落库仍是用户原句；失败/超时降级原句。
+      let retrievalQuestion = question
+      if (shouldRewriteQuestion(question, history.length) && aiConfigStore.isComplete) {
+        try {
+          const config = await aiConfigStore.ensureConfig()
+          retrievalQuestion = await rewriteQuestionForRetrieval(question, history, config)
+        } catch {
+          retrievalQuestion = question
+        }
+      }
+
+      // 缓存版取数：切片 embedding 命中 IndexedDB 时只发一次轻量 id 请求
+      const chunkResult = await getKnowledgeChunksForQaCached(knowledgeBaseId, 500)
       if (!chunkResult.success || !chunkResult.data) {
         throw new Error(chunkResult.error || '查询知识切片失败')
       }
 
       const chunks = chunkResult.data
-      const chunksWithEmbeddings = chunks.filter((chunk) => chunk.embedding !== null)
+      const chunksWithEmbeddings = chunks.filter(
+        (chunk): chunk is KnowledgeChunkForQa & { embedding: Float32Array } =>
+          chunk.embedding instanceof Float32Array && chunk.embedding.length > 0,
+      )
 
-      if (chunksWithEmbeddings.length > 0 && aiConfigStore.isComplete) {
+      // 双路并行检索：向量懂语义改述，关键词擅长专有名词精确匹配，
+      // 各取 top8 交给 RRF 融合，而不是旧的「向量低质才整体切关键词」二选一
+      const vectorTask = (async (): Promise<RetrievedChunk<RetrieveChunkInput>[]> => {
+        if (chunksWithEmbeddings.length === 0 || !aiConfigStore.isComplete) {
+          return []
+        }
+
         try {
           const config = await aiConfigStore.ensureConfig()
-          const embeddingResult = await createEmbedding(question, config)
+          const embeddingResult = await createEmbedding(retrievalQuestion, config)
+          const queryEmbedding = new Float32Array(embeddingResult.embedding)
 
-          const similarChunks = findTopSimilarChunks(
-            embeddingResult.embedding,
-            chunksWithEmbeddings.map((chunk) => ({
-              item: chunk,
-              embedding: chunk.embedding as number[],
-            })),
-            5,
+          // 相似度计算下放 Web Worker：切片向量打包为单个矩阵后
+          // Transferable 零拷贝移交，避免大知识库时长任务阻塞主线程
+          const hits = await findTopSimilarIndicesAsync(
+            queryEmbedding,
+            chunksWithEmbeddings.map((chunk) => chunk.embedding),
+            8,
             0.1,
           )
 
-          retrieved = similarChunks.map((result: SimilarChunk<KnowledgeChunkForQa>) => ({
-            id: result.item.id,
-            fileId: result.item.fileId,
-            documentId: result.item.documentId,
-            sourceType: result.item.sourceType,
-            sourceName: result.item.sourceName,
-            chunkIndex: result.item.chunkIndex,
-            content: result.item.content,
-            score: result.similarity,
-            hitCount: 0,
-            matchedKeywords: [],
-          }))
-          if (retrieved.length > 0) retrievalStrategy = 'vector'
+          return hits.map((hit) => {
+            const chunk = chunksWithEmbeddings[hit.index]
+            return {
+              id: chunk.id,
+              fileId: chunk.fileId,
+              documentId: chunk.documentId,
+              sourceType: chunk.sourceType,
+              sourceName: chunk.sourceName,
+              chunkIndex: chunk.chunkIndex,
+              content: chunk.content,
+              score: hit.similarity,
+              hitCount: 0,
+              matchedKeywords: [],
+            }
+          })
         } catch (error) {
+          // 向量路失败不阻塞回答：关键词路兜底
           console.warn('[chat.prepareSmartQa] embedding retrieval failed, fallback:', error)
+          return []
         }
-      }
+      })()
 
-      if (retrievalStrategy !== 'vector' || !hasValuableVectorChunks(retrieved)) {
-        retrieved = retrieveRelevantChunks(question, mapChunksToRetrieveInputs(chunks), {
-          topK: 5,
+      const keywordTask = retrieveRelevantChunksAsync(
+        retrievalQuestion,
+        mapChunksToRetrieveInputs(chunks),
+        {
+          topK: 8,
           minScore: 0.03,
-        })
-        retrievalStrategy = retrieved.length > 0 ? 'keyword' : 'none'
+        },
+      ).catch((error): RetrievedChunk<RetrieveChunkInput>[] => {
+        console.warn('[chat.prepareSmartQa] keyword retrieval failed:', error)
+        return []
+      })
+
+      const [vectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask])
+
+      // 质量门槛按各路自己的量纲判断（余弦相似度 vs 关键词密度分），任一路达标即视为有价值
+      vectorValuable = hasValuableVectorChunks(vectorResults)
+      keywordValuable = hasValuableRetrievedChunks(keywordResults, {
+        minTopScore: 0.1,
+        minHitCount: 2,
+        minAverageScore: 0.06,
+      })
+
+      if (vectorResults.length > 0 && keywordResults.length > 0) {
+        retrieved = fuseRetrievedChunks(vectorResults, keywordResults, { topK: 5 })
+      } else if (vectorResults.length > 0) {
+        retrieved = vectorResults.slice(0, 5)
+      } else {
+        retrieved = keywordResults.slice(0, 5)
       }
     }
 
-    const hasValuableSources =
-      retrievalStrategy === 'vector'
-        ? hasValuableVectorChunks(retrieved)
-        : hasValuableRetrievedChunks(retrieved, {
-            minTopScore: 0.1,
-            minHitCount: 2,
-            minAverageScore: 0.06,
-          })
+    const hasValuableSources = retrieved.length > 0 && (vectorValuable || keywordValuable)
 
     const useKnowledgeEnhancedMode = shouldRetrieveKnowledge && hasValuableSources
     const mode: ChatAnswerMode = useKnowledgeEnhancedMode ? 'knowledge-enhanced' : 'general-ai'
@@ -295,11 +349,22 @@ export function useChatMessages(session: ChatSessionRefs) {
     qaConfig: KnowledgeQaConfig
     trackQuestionLength?: number
   }) {
+    // 多轮上下文：取当前提问之前的消息（重新生成时同时排除上一次回答），按预算裁剪。
+    // 先于检索构建：prepareSmartQa 的指代消解改写需要读取历史。
+    const history = buildChatHistory(
+      takeMessagesBeforeLastQuestion(messages.value, input.question),
+    )
+
+    // 链路分段计时：检索耗时 / TTFT / 流式时长，入库供后台分析分位数
+    const perf = startQaTimeline()
+
     const prepared = await prepareSmartQa(
       input.question,
       session.selectedKnowledgeBaseId.value || null,
       input.qaConfig,
+      history,
     )
+    perf.lap('retrieval_done')
 
     const localAssistantMessage = buildLocalPendingMessage({
       role: 'assistant',
@@ -312,9 +377,23 @@ export function useChatMessages(session: ChatSessionRefs) {
 
     appendLocalMessage(localAssistantMessage)
 
+    const abortController = new AbortController()
+    activeAbortController = abortController
+
     let finalText = ''
     let finalStatus: ChatMessageStatus = 'done'
     let finalErrorMessage: string | null = null
+
+    // 流式渲染合帧：SSE chunk 到达频率远高于刷新率，
+    // 每帧最多触发一次响应式更新，避免高频 markdown 重渲染阻塞主线程。
+    let pendingFrame: number | null = null
+    const flushStreamingText = () => {
+      pendingFrame = null
+      updateMessageById(localAssistantMessage.id, (message) => ({
+        ...message,
+        content: finalText,
+      }))
+    }
 
     try {
       const config = await aiConfigStore.ensureConfig()
@@ -323,24 +402,43 @@ export function useChatMessages(session: ChatSessionRefs) {
       }
 
       const result = await generateAiTextStream(
-        { userPrompt: prepared.prompt },
+        { userPrompt: prepared.prompt, history, signal: abortController.signal },
         config,
         (chunk) => {
+          if (!finalText) {
+            perf.lap('first_token')
+          }
           finalText += chunk
-          updateMessageById(localAssistantMessage.id, (message) => ({
-            ...message,
-            content: finalText,
-          }))
+          if (pendingFrame === null) {
+            pendingFrame = requestAnimationFrame(flushStreamingText)
+          }
         },
       )
+      perf.lap('stream_done')
 
-      if (!result.success) {
+      if (!result.success && !abortController.signal.aborted) {
         finalStatus = 'error'
         finalErrorMessage = result.error || 'AI 回答失败'
       }
     } catch (error) {
-      finalStatus = 'error'
-      finalErrorMessage = error instanceof Error ? error.message : 'AI 回答失败'
+      if (!abortController.signal.aborted) {
+        finalStatus = 'error'
+        finalErrorMessage = error instanceof Error ? error.message : 'AI 回答失败'
+      }
+    } finally {
+      if (pendingFrame !== null) {
+        cancelAnimationFrame(pendingFrame)
+        pendingFrame = null
+      }
+      if (activeAbortController === abortController) {
+        activeAbortController = null
+      }
+    }
+
+    // 用户主动停止且尚无内容：撤掉占位消息，不落库
+    if (abortController.signal.aborted && !finalText.trim()) {
+      messages.value = messages.value.filter((item) => item.id !== localAssistantMessage.id)
+      return
     }
 
     if (finalStatus === 'error' && !finalText.trim()) {
@@ -389,6 +487,14 @@ export function useChatMessages(session: ChatSessionRefs) {
         total_tokens: null,
       })
     }
+
+    perf.finish({
+      qa_mode: prepared.mode,
+      source_count: prepared.sources.length,
+      answer_length: finalText.length,
+      status: finalStatus,
+      aborted: abortController.signal.aborted,
+    })
 
     if (finalStatus === 'error') {
       ElMessage.error(finalErrorMessage || 'AI 回答失败')
@@ -477,6 +583,11 @@ export function useChatMessages(session: ChatSessionRefs) {
     }
   }
 
+  // ─── 停止生成 ───
+  function handleStop() {
+    activeAbortController?.abort()
+  }
+
   return {
     messages,
     loadingMessages,
@@ -487,5 +598,6 @@ export function useChatMessages(session: ChatSessionRefs) {
     loadMessages,
     handleSend,
     handleRegenerate,
+    handleStop,
   }
 }

@@ -17,9 +17,9 @@ export interface AsyncState<T> {
   error: string | null
 }
 
-export interface UseAsyncStateOptions {
+export interface UseAsyncStateOptions<T = unknown> {
   /** 初始数据 */
-  initialData?: any
+  initialData?: T | null
   /** 骨架屏/loading 最短展示时间(ms)，防止接口过快导致闪烁。默认 200ms */
   minLoadingMs?: number
 }
@@ -60,8 +60,8 @@ export interface UseAsyncStateReturn<T> {
  * execute(() => generateAiText(prompt), { streaming: true })
  * ```
  */
-export function useAsyncState<T = any>(
-  options: UseAsyncStateOptions = {},
+export function useAsyncState<T = unknown>(
+  options: UseAsyncStateOptions<T> = {},
 ): UseAsyncStateReturn<T> {
   const { initialData = null, minLoadingMs = 200 } = options
 

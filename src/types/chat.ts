@@ -82,6 +82,7 @@ export interface KnowledgeChunkForQa {
   content: string
   tokenCount: number | null
   meta: Record<string, unknown> | null
-  embedding: number[] | null
+  /** Float32Array 形态：可打包为矩阵 transfer 给 Worker，IndexedDB 缓存体积也比 number[] 小约 75% */
+  embedding: Float32Array | null
   createdAt: string
 }
