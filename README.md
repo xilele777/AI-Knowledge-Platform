@@ -108,6 +108,17 @@ npm install
 npm run dev
 ```
 
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动开发服务器 |
+| `npm run build` | 类型检查 + 生产构建 |
+| `npm test` | Vitest 单元测试（118 个用例） |
+| `npm run test:e2e` | Playwright E2E（全 mock 后端，无需真实密钥） |
+| `npm run lint` / `npm run lint:check` | ESLint 修复 / 只检查 |
+| `npm run format` | Prettier 格式化 |
+
 ## 功能
 
 | 模块 | 说明 |
@@ -131,13 +142,13 @@ Model:        gpt-4o-mini
 ```
 
 - 支持任何 OpenAI 兼容接口（OpenAI、MiniMax、DeepSeek 等）
-- Key 经过 Supabase RLS 加密传输并存储，仅本人可见
+- Key 存入 `user_ai_config` 表，通过 Supabase RLS 限制仅本人可读写，并由 Edge Function 代理调用模型
 
 ## 项目结构
 
 ```
 src/
-├── api/          API 层（Supabase 直连 + AI 调用）
+├── api/          API 层（Supabase 直连 + AI 调用 + SSE 解析）
 ├── types/        TypeScript 类型定义
 ├── stores/       Pinia 状态管理
 ├── router/       路由 + 侧边栏菜单配置
@@ -145,19 +156,26 @@ src/
 ├── views/        页面视图
 │   ├── docs/     文档管理
 │   ├── knowledge/ 知识库
-│   ├── chat/     AI 问答
+│   ├── chat/     AI 问答（消息列表 / 输入 / 会话与消息 composables）
 │   ├── shared/   共享广场
 │   ├── admin/    管理后台
 │   ├── login/    登录 / 注册
 │   └── ProfileView.vue  个人中心
 ├── components/   跨页面公共组件
-├── utils/        工具函数（切片、检索、向量、埋点等）
+├── composables/  通用组合式函数（防抖、异步状态、暗黑模式等）
+├── workers/      Web Worker（检索评分：向量矩阵 + 关键词）
+├── utils/        核心纯函数（切片、双路检索、RRF 融合、SSE/think/引用解析、
+│                 流式切分、向量缓存、问题改写、性能度量、错误监控、埋点）
+│   └── __tests__/  Vitest 单元测试
 ├── styles/       MD3 主题 + Element Plus 覆盖
 └── constants/    埋点事件常量
 
+e2e/              Playwright E2E（全 mock Supabase/SSE）
+docs/             亮点深挖与优化方案文档
 supabase/
 ├── sql/          12 个数据库迁移脚本
 └── functions/    Edge Functions（ai-chat / ai-embeddings / admin-analytics）
+.github/          CI（lint + 单测 + 构建 / E2E 双 job）
 ```
 
 ## 架构要点
@@ -181,13 +199,14 @@ supabase/
 - **文档同步**：`chunkText()` 切片 → 批量写入 `knowledge_chunks` → 可选向量 Embedding
 - **草稿**：编辑中通过 `localStorage` 自动暂存，保存后自动清除
 - **兼容降级**：消息写入时自动检测列是否存在，兼容未执行全部迁移的旧库
-- **埋点**：9 种事件类型，写入失败静默丢弃
+- **埋点**：12 种事件类型（业务 9 种 + 性能/错误 3 种），写入失败静默丢弃
 
 ### 性能
 
 - **路由级懒加载** + 按需分包：仅对首屏共享库（Element Plus / Supabase）手动分组，ECharts、md-editor 等懒加载路由专属库交由自动分包，避免 vendor 组被入口静态依赖拖入首屏
 - 首屏 JS 由 1.24MB 降至 0.70MB（gzip 399KB → 222KB，**-44%**）
-- 聊天流式输出 rAF 合帧渲染；消息区吸附式自动滚动（用户上滑即停，回底恢复）
+- 聊天流式输出 rAF 合帧（控制更新频率）+ 增量渲染（控制单帧渲染量）；消息区吸附式自动滚动（用户上滑即停，回底恢复）
+- 运行时可观测：LCP/CLS/INP 现场采集 + AI 链路分段打点（检索 / TTFT / 流式时长）入库
 
 ### 工程质量
 
@@ -196,3 +215,6 @@ supabase/
 - **CI**：GitHub Actions 双 job（lint + 单测 + 构建 / E2E），push 与 PR 触发
 - **代码规范**：ESLint（flat config，vue + typescript-eslint）+ Prettier，`npm run lint` / `npm run format`
 
+## 文档
+
+- [docs/project-development-manual.md](docs/project-development-manual.md) — 项目开发全手册：架构、数据流、核心逻辑、风险边界与面试话术

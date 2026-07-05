@@ -295,7 +295,7 @@ onMounted(() => {
               <p><strong>提示：</strong></p>
               <ul>
                 <li><strong>必须配置</strong>你自己的 API Key 才能使用 AI 问答、写作助手和知识库功能</li>
-                <li>API Key 加密存储于服务端数据库中，仅你本人可见和使用</li>
+                <li>API Key 存储于服务端数据库中，通过 RLS 限制仅你本人可见，并由 Edge Function 代理使用</li>
                 <li>支持任何 OpenAI 兼容接口（如 OpenAI、MiniMax、DeepSeek 等）</li>
                 <li>如未配置，AI 功能将返回错误提示</li>
               </ul>

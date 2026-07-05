@@ -61,6 +61,14 @@ function switchChatAndLoad(chat: typeof chats.value[number]) {
   void loadMessages(chat.id)
 }
 
+// ─── 新建对话：进入空白草稿态，下一次发送时再创建真实会话 ───
+function startNewChat() {
+  resetDraftSession()
+  messages.value = []
+  lastQuestion.value = ''
+  lastQuestionChatId.value = ''
+}
+
 // ─── 删除会话时清理关联状态 ───
 async function handleDeleteChat(chatId: string, event: Event) {
   event.stopPropagation()
@@ -120,7 +128,7 @@ onMounted(() => {
 
 // ─── 键盘快捷键 ───
 useKeyboardShortcut({
-  'ctrl+n': () => resetDraftSession(),
+  'ctrl+n': () => startNewChat(),
   'escape': () => { showQaConfigDrawer.value = false },
 })
 </script>
@@ -135,7 +143,7 @@ useKeyboardShortcut({
       <aside class="sidebar">
         <div class="sidebar-header">
           <h1 class="sidebar-title">AI 助手</h1>
-          <el-button size="small" @click="resetDraftSession" class="new-chat-btn">
+          <el-button size="small" @click="startNewChat" class="new-chat-btn">
             新建对话
           </el-button>
         </div>
