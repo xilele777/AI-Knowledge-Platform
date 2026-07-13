@@ -114,6 +114,7 @@ export interface KnowledgeChunk {
   tokenCount: number | null
   meta: Record<string, unknown> | null
   embedding: number[] | null
+  embeddingVector?: number[] | null
   createdAt: string
 }
 
@@ -127,6 +128,7 @@ export interface CreateKnowledgeChunkInput {
   tokenCount?: number | null
   meta?: Record<string, unknown> | null
   embedding?: number[] | null
+  embeddingVector?: number[] | null
 }
 
 export interface BatchCreateKnowledgeChunksInput {
@@ -140,6 +142,7 @@ export interface BatchCreateKnowledgeChunksInput {
     tokenCount?: number | null
     meta?: Record<string, unknown> | null
     embedding?: number[] | null
+    embeddingVector?: number[] | null
   }>
 }
 

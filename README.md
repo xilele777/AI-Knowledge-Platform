@@ -22,40 +22,31 @@
 > 各项均为源码级实现，非组件库/SDK 开箱能力。
 
 **1. 手写 SSE 流式解析管线** — [src/api/ai.ts](src/api/ai.ts)
-`TextDecoder` 增量解码 + 事件边界缓冲（正确处理 chunk 切在 SSE 事件中间的场景）；兼容多种 OpenAI 兼容端点的嵌套 delta 格式（深度优先文本提取）；`AbortController` 全链路中断（停止生成）。
+`TextDecoder` 增量解码 + 事件边界缓冲（正确处理 chunk 切在 SSE 事件中间的场景）；兼容多种 OpenAI 兼容端点的嵌套 delta 格式（深度优先文本提取）；流前先消费服务端 `meta` 事件，再持续处理 token 增量；`AbortController` 全链路中断（停止生成）。
 
 **2. rAF 合帧的流式渲染** — [src/views/chat/composables/useChatMessages.ts](src/views/chat/composables/useChatMessages.ts)
 SSE chunk 到达频率远高于屏幕刷新率，每帧最多触发一次响应式更新，避免高频 Markdown 重渲染阻塞主线程。
 
-**3. Web Worker 检索卸载 + Transferable 零拷贝** — [src/utils/retrievalWorkerClient.ts](src/utils/retrievalWorkerClient.ts) / [src/workers/retrieval.worker.ts](src/workers/retrieval.worker.ts)
-余弦相似度（500 切片 × 1536 维）与中文 N-gram 关键词评分在 Worker 线程执行，主线程零阻塞；切片向量打包为单个 `Float32Array` 矩阵后以 Transferable 移交，跨线程传输成本从 O(数据量) 降为 O(1)；懒加载单例 Worker、自增 id 关联并发请求，Worker 崩溃自动降级主线程同步计算。
+**3. 服务端 pgvector 检索编排** — [supabase/functions/ai-chat/index.ts](supabase/functions/ai-chat/index.ts) / [supabase/functions/_shared/ragChunks.ts](supabase/functions/_shared/ragChunks.ts) / [supabase/functions/_shared/ragRetrieval.ts](supabase/functions/_shared/ragRetrieval.ts)
+知识增强问答已迁到服务端：Edge Function 负责问题改写、query embedding、pgvector 向量召回、关键词检索、RRF 融合、质量判断与 authoritative `sources` 选择；数据库通过 `match_knowledge_chunks` RPC + `embedding_vector` HNSW 索引执行主向量检索，异常时再回退到旧数组扫描作为兜底路径。
 
-**4. 切片向量 IndexedDB 缓存** — [src/utils/embeddingCache.ts](src/utils/embeddingCache.ts) + [src/api/chat.ts](src/api/chat.ts)
-利用「切片行不可变（只插入/整批删除）」的数据特性，用一次轻量 id 请求做双向集合 diff：新增切片增量拉取、已删切片本地淘汰。缓存命中时每次提问的网络流量从 MB 级（全量 embedding JSON）降到 KB 级；向量以 `Float32Array` 存储，体积比 `number[]` JSON 约 -75%。
+**4. authoritative sources + 引用溯源闭环** — [src/api/ai.ts](src/api/ai.ts) / [src/utils/parseCitations.ts](src/utils/parseCitations.ts) / [SourceChunks.vue](src/views/chat/components/SourceChunks.vue)
+服务端在流前下发 `meta` 事件，前端据此更新最终 `answerMode` 与 `sources` 并持久化；回答末尾「参考片段: [片段x,片段y]」解析为可点击角标，展开来源面板、滚动定位并高亮对应切片，形成可验证的检索 → 生成 → 溯源闭环。
 
-**5. 混合检索：向量 + 关键词 RRF 融合** — [src/utils/fuseRetrieval.ts](src/utils/fuseRetrieval.ts) / [src/utils/chunkText.ts](src/utils/chunkText.ts)
-文档「段落 → 句子 → 硬切」三级切片后，双路并行检索按 Reciprocal Rank Fusion（`Σ 1/(k + rank)`）融合，替代「向量低质才切关键词」的二选一降级——向量懂语义改述，关键词（中文 N-gram + 停用词 + 密度评分）擅长专有名词精确匹配，秩融合天然免两路分数归一化；任一路失败自动退化单路，不阻塞回答。
-
-**6. 多轮指代消解（检索前问题改写）** — [src/utils/rewriteQuestion.ts](src/utils/rewriteQuestion.ts)
-追问「那它怎么部署？」直接检索必然失效（检索 query 与对话语境脱节）。触发条件收窄为纯函数判断（指代词表 + 长度阈值 + 有无历史），命中才用一次低成本 LLM 调用（120 token 上限、temperature 0、2.5s 超时降级）改写为自包含问题；改写只用于检索，展示与落库仍是原句。
-
-**7. 流式 Markdown 增量渲染** — [src/utils/streamingMarkdown.ts](src/utils/streamingMarkdown.ts)
+**5. 流式 Markdown 增量渲染** — [src/utils/streamingMarkdown.ts](src/utils/streamingMarkdown.ts)
 rAF 合帧只控制更新「频率」，没控制单帧「渲染量」——回答越长每帧全文重解析越卡。将流式文本按围栏状态机切为「已完成段落 / 进行中尾段」分别渲染：stable 段仅在新段落完成时变化，每帧真正重渲染的只有小体积尾段；未闭合代码块自动补合成闭栏防样式跳变。
 
-**8. `<think>` 推理块流式分流** — [src/utils/streamingThinkParser.ts](src/utils/streamingThinkParser.ts)
-标签可能被 SSE chunk 在任意位置切断（`<thi` + `nk>`），逐帧解析累积全文并暂时隐藏半截标签，推理内容实时分流到可折叠面板（思考中自动展开、闭合后自动收起），正文通道零污染。
-
-**9. 引用溯源闭环** — [src/utils/parseCitations.ts](src/utils/parseCitations.ts) + [SourceChunks.vue](src/views/chat/components/SourceChunks.vue)
-宽容解析回答末尾的「参考片段: [片段x,片段y]」（全角/半角、有无括号、越界序号过滤），渲染为可点击角标；点击展开来源面板、滚动定位并闪烁高亮对应切片——检索、生成、溯源三段中前端负责的「可验证性」。
-
-**10. 多轮上下文双层预算裁剪** — [src/utils/chatHistory.ts](src/utils/chatHistory.ts) + [supabase/functions/ai-chat/index.ts](supabase/functions/ai-chat/index.ts)
+**6. 服务端问答链路双层预算裁剪** — [src/utils/chatHistory.ts](src/utils/chatHistory.ts) + [supabase/functions/ai-chat/index.ts](supabase/functions/ai-chat/index.ts)
 前端按字符预算从新到旧收集历史、单条超长尾部截断、剥离 `<think>` 块；Edge Function 服务端再做防御性截断，双层保障上游 token 成本可控。
 
-**11. 首屏 JS 体积 -44% + 运行时可观测** — [vite.config.ts](vite.config.ts) / [src/utils/perfMetrics.ts](src/utils/perfMetrics.ts) / [src/utils/errorMonitor.ts](src/utils/errorMonitor.ts)
+**7. `<think>` 推理块流式分流** — [src/utils/streamingThinkParser.ts](src/utils/streamingThinkParser.ts)
+标签可能被 SSE chunk 在任意位置切断（`<thi` + `nk>`），逐帧解析累积全文并暂时隐藏半截标签，推理内容实时分流到可折叠面板（思考中自动展开、闭合后自动收起），正文通道零污染。
+
+**8. 首屏 JS 体积 -44% + 运行时可观测** — [vite.config.ts](vite.config.ts) / [src/utils/perfMetrics.ts](src/utils/perfMetrics.ts) / [src/utils/errorMonitor.ts](src/utils/errorMonitor.ts)
 路由级懒加载 + `manualChunks` 仅分组首屏共享库，1.24MB → 0.70MB（gzip 399KB → 222KB）；线上补齐 RUM：`PerformanceObserver` 采集 LCP/CLS/INP，AI 链路分段打点（检索耗时 / 首 token 延迟 TTFT / 流式时长），三入口错误监控（`window.onerror` / `unhandledrejection` / Vue `errorHandler`）带指纹去重限频，全部复用埋点管道入库。
 
-**12. 测试与工程化** — [src/utils/__tests__/](src/utils/__tests__/) / [e2e/](e2e/) / [.github/workflows/ci.yml](.github/workflows/ci.yml)
-Vitest 118 个用例覆盖切片、双检索评分、RRF 融合、SSE 解析、流式切分、think 状态机、引用解析等核心纯函数；Playwright E2E 全 mock 后端（localStorage 注入登录态 + 拦截 PostgREST/SSE），无密钥可跑通「提问 → 流式回答 → 思考面板」关键路径；GitHub Actions 双 job（lint + 单测 + 构建 / E2E）。
+**9. 测试与工程化** — [src/utils/__tests__/](src/utils/__tests__/) / [e2e/](e2e/) / [.github/workflows/ci.yml](.github/workflows/ci.yml)
+Vitest 覆盖 SSE 解析、流式切分、think 状态机、引用解析等核心纯函数；Playwright E2E 全 mock 后端（localStorage 注入登录态 + 拦截 PostgREST/SSE），覆盖「提问 → meta authoritative sources → 流式回答 → 思考面板」关键路径；GitHub Actions 双 job（lint + 单测 + 构建 / E2E）。
 
 ## 快速开始
 
@@ -89,7 +80,7 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 在 Supabase SQL Editor 中按顺序执行 `supabase/sql/` 下的迁移脚本：
 
 ```
-001 → 012
+001 → 014
 ```
 
 ### 4. 部署 Edge Functions
@@ -164,16 +155,16 @@ src/
 ├── components/   跨页面公共组件
 ├── composables/  通用组合式函数（防抖、异步状态、暗黑模式等）
 ├── workers/      Web Worker（检索评分：向量矩阵 + 关键词）
-├── utils/        核心纯函数（切片、双路检索、RRF 融合、SSE/think/引用解析、
-│                 流式切分、向量缓存、问题改写、性能度量、错误监控、埋点）
+├── utils/        核心纯函数（SSE/think/引用解析、流式切分、向量生成、
+│                 性能度量、错误监控、埋点）
 │   └── __tests__/  Vitest 单元测试
 ├── styles/       MD3 主题 + Element Plus 覆盖
 └── constants/    埋点事件常量
 
-e2e/              Playwright E2E（全 mock Supabase/SSE）
+e2e/              Playwright E2E（全 mock Supabase/SSE + server meta events）
 docs/             亮点深挖与优化方案文档
 supabase/
-├── sql/          12 个数据库迁移脚本
+├── sql/          14 个数据库迁移脚本（含 pgvector 双列迁移）
 └── functions/    Edge Functions（ai-chat / ai-embeddings / admin-analytics）
 .github/          CI（lint + 单测 + 构建 / E2E 双 job）
 ```
@@ -182,11 +173,10 @@ supabase/
 
 ### AI 与检索
 
-- **多轮上下文**：历史消息按字符预算（默认 6000）从新到旧回传，超长单条尾部截断，`<think>` 推理块自动剥离；含指代的追问先经低成本 LLM 改写为自包含问题再检索
-- **混合检索**：向量余弦相似度与关键词匹配（中文 Ngram + 停用词 + 密度评分）双路并行，RRF 秩融合取长补短；单路失败自动退化，缓存命中时切片向量走 IndexedDB 不重复下载
-- **Web Worker**：相似度与关键词评分在 Worker 线程执行，向量打包矩阵 Transferable 零拷贝移交，主线程零阻塞；Worker 不可用时自动降级主线程
-- **SSE 流式**：手动解析 `text/event-stream`，兼容不同 API 端点的嵌套响应格式；chunk 更新按 `requestAnimationFrame` 合帧渲染，支持中断（停止生成）
-- **Edge Functions**：`ai-chat` 代理对话请求（含历史消息服务端防御性截断），`ai-embeddings` 生成向量，均通过 RLS 读取用户 AI 配置
+- **服务端 RAG 编排**：chat-time RAG 已迁到 Edge Function。`ai-chat` 负责问题改写、query embedding、pgvector 向量召回、关键词检索、RRF 融合、质量判断与 authoritative `sources` 选择；前端只发送结构化问题与知识库上下文。
+- **pgvector 检索主路径**：`knowledge_chunks.embedding_vector` 保存 1024 维文本向量，数据库通过 `match_knowledge_chunks` RPC + HNSW 索引执行主向量检索；向量路径异常时可回退到旧数组扫描作为兜底。
+- **SSE 流式协议**：手动解析 `text/event-stream`，在 token 增量前先消费服务端 `meta` 事件，更新最终 `answerMode` 与 `sources`；随后继续兼容 OpenAI 风格 `choices[].delta.content` 文本流。
+- **Edge Functions**：`ai-chat` 代理并编排问答请求，`ai-embeddings` 负责生成文本向量，均通过 RLS 读取用户 AI 配置。
 
 ### 安全
 

@@ -1,4 +1,5 @@
 import type { UserAiConfig } from '../types/ai'
+import { normalizeBaseUrl, resolveDefaultModel } from '../../shared/aiConfigCore'
 
 export interface AiResolvedConfig {
   baseUrl: string
@@ -12,20 +13,11 @@ export interface AiRuntimeConfigInput {
   model?: string
 }
 
-const DEFAULT_MODEL = 'gpt-4o-mini'
-const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
-
-function normalizeBaseUrl(url: string | undefined | null): string {
-  if (!url) return DEFAULT_BASE_URL
-  const trimmed = url.trim()
-  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed
-}
-
 export function resolveAiConfigFromUserConfig(userConfig: UserAiConfig | null): AiResolvedConfig {
   return {
     baseUrl: normalizeBaseUrl(userConfig?.apiBaseUrl),
-    apiKey: userConfig?.apiKey?.trim() || '',
-    model: userConfig?.model?.trim() || DEFAULT_MODEL,
+    apiKey: typeof userConfig?.apiKey === 'string' ? userConfig.apiKey.trim() : '',
+    model: resolveDefaultModel(userConfig?.model),
   }
 }
 

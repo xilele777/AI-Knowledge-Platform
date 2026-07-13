@@ -1,5 +1,13 @@
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts'
 import { resolveUserAiConfig } from '../_shared/aiConfig.ts'
+import {
+  buildGeneralAiPrompt,
+  buildUpstreamMessages,
+  normalizeAiChatRequest,
+} from '../_shared/aiPrompt.ts'
+import { loadKnowledgeChunksForQa, createQueryEmbedding } from '../_shared/ragChunks.ts'
+import { selectKnowledgeSources } from '../_shared/ragRetrieval.ts'
+import { rewriteQuestionForServerRetrieval } from '../_shared/ragRewrite.ts'
 
 type AiGenerateTextParams = {
   systemPrompt?: string
@@ -12,7 +20,35 @@ type AiGenerateTextParams = {
   frequencyPenalty?: number
 }
 
+type AiChatRequestKind = 'plain' | 'knowledge-enhanced'
+
+type AiChatKnowledgePayload = {
+  knowledgeBaseId?: string
+  question?: string
+  history?: Array<{ role?: string; content?: string }>
+  systemPrompt?: string
+  answerStyle?: string
+  sources?: Array<{
+    chunkId?: string
+    fileId?: string | null
+    documentId?: string | null
+    sourceType?: 'file' | 'document'
+    sourceName?: string | null
+    chunkIndex?: number | null
+    content?: string
+    score?: number
+    matchedKeywords?: string[]
+  }>
+}
+
+type AiChatRequestPayload = {
+  kind?: AiChatRequestKind
+  params?: AiGenerateTextParams
+  knowledge?: AiChatKnowledgePayload
+}
+
 type ChatRequestBody = {
+  request?: AiChatRequestPayload
   params?: AiGenerateTextParams
   stream?: boolean
 }
@@ -57,6 +93,18 @@ function buildMessages(params: AiGenerateTextParams) {
   return messages
 }
 
+function normalizeRequest(body: ChatRequestBody) {
+  const requestKind = body.request?.kind
+  const kind: AiChatRequestKind =
+    requestKind === 'knowledge-enhanced' ? 'knowledge-enhanced' : 'plain'
+
+  return {
+    kind,
+    params: body.request?.params || body.params || {},
+    stream: body.stream === true,
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -73,14 +121,58 @@ Deno.serve(async (request) => {
 
   try {
     const body = (await request.json()) as ChatRequestBody
-    const params = body.params || {}
-    const userPrompt = params.userPrompt?.trim()
+    const normalized = normalizeAiChatRequest(body)
+    const userPrompt =
+      normalized.kind === 'knowledge-enhanced'
+        ? normalized.knowledge?.question
+        : normalized.params.userPrompt?.trim()
 
     if (!userPrompt) {
       return errorResponse('userPrompt is required', 400)
     }
 
     const config = await resolveUserAiConfig(authHeader)
+    let streamMeta: { type: 'meta'; mode: 'general-ai' | 'knowledge-enhanced'; sources: unknown[] } | null = null
+
+    if (normalized.kind === 'knowledge-enhanced' && normalized.knowledge?.knowledgeBaseId) {
+      const rewrittenQuestion = await rewriteQuestionForServerRetrieval(
+        normalized.knowledge.question,
+        normalized.knowledge.history,
+        config,
+      )
+      const chunks = await loadKnowledgeChunksForQa(authHeader, normalized.knowledge.knowledgeBaseId, 500)
+      const queryEmbedding = chunks.length ? await createQueryEmbedding(authHeader, rewrittenQuestion) : null
+      const selection = await selectKnowledgeSources({
+        authHeader,
+        knowledgeBaseId: normalized.knowledge.knowledgeBaseId,
+        question: rewrittenQuestion,
+        chunks,
+        queryEmbedding,
+      })
+
+      streamMeta = {
+        type: 'meta',
+        mode: selection.mode,
+        sources: selection.sources,
+      }
+
+      if (selection.mode === 'knowledge-enhanced') {
+        normalized.knowledge.question = rewrittenQuestion
+        normalized.knowledge.sources = selection.sources
+      } else {
+        normalized.kind = 'plain'
+        normalized.knowledge = null
+        normalized.params = {
+          ...normalized.params,
+          history: normalized.params.history,
+          userPrompt: buildGeneralAiPrompt(userPrompt, {
+            systemInstruction: body.request?.knowledge?.systemPrompt,
+            answerStyle: body.request?.knowledge?.answerStyle,
+          }),
+        }
+      }
+    }
+
     const upstream = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -89,18 +181,52 @@ Deno.serve(async (request) => {
       },
       body: JSON.stringify({
         model: config.model,
-        messages: buildMessages(params),
-        stream: body.stream === true,
-        temperature: params.temperature ?? 0.7,
-        max_tokens: params.maxTokens,
-        top_p: params.topP,
-        presence_penalty: params.presencePenalty,
-        frequency_penalty: params.frequencyPenalty,
+        messages: buildUpstreamMessages(normalized),
+        stream: normalized.stream,
+        temperature: normalized.params.temperature ?? 0.7,
+        max_tokens: normalized.params.maxTokens,
+        top_p: normalized.params.topP,
+        presence_penalty: normalized.params.presencePenalty,
+        frequency_penalty: normalized.params.frequencyPenalty,
       }),
     })
 
-    if (body.stream === true) {
-      return new Response(upstream.body, {
+    if (normalized.stream) {
+      if (!streamMeta) {
+        return new Response(upstream.body, {
+          status: upstream.status,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': upstream.headers.get('Content-Type') || 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        })
+      }
+
+      const encoder = new TextEncoder()
+      const metaChunk = encoder.encode(`data: ${JSON.stringify(streamMeta)}\n\n`)
+      const stream = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(metaChunk)
+          const reader = upstream.body?.getReader()
+          if (!reader) {
+            controller.close()
+            return
+          }
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              if (value) controller.enqueue(value)
+            }
+          } finally {
+            controller.close()
+          }
+        },
+      })
+
+      return new Response(stream, {
         status: upstream.status,
         headers: {
           ...corsHeaders,

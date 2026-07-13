@@ -1,4 +1,11 @@
-import type { AiGenerateTextParams, AiResult, AiTextResultData } from '../types/ai'
+import type {
+  AiChatRequest,
+  AiChatRequestKind,
+  AiChatStreamMeta,
+  AiGenerateTextParams,
+  AiResult,
+  AiTextResultData,
+} from '../types/ai'
 import type { AiResolvedConfig } from '../utils/aiConfig'
 import { fetchEdgeFunctionStream, invokeEdgeFunction } from '../utils/serverProxy'
 
@@ -31,6 +38,12 @@ type OpenAiStreamPayload = {
     }
     text?: unknown
   }>
+}
+
+type AiChatStreamEnvelope = {
+  type?: 'meta'
+  mode?: AiChatStreamMeta['mode']
+  sources?: AiChatStreamMeta['sources']
 }
 
 function ok<T>(data: T): AiResult<T> {
@@ -181,10 +194,61 @@ export function parseSseDataLines(eventText: string): string[] {
     .filter(Boolean)
 }
 
+function buildAiChatRequest(
+  kind: AiChatRequestKind,
+  params: Partial<AiGenerateTextParams>,
+  stream: boolean,
+): AiChatRequest {
+  return {
+    stream,
+    request: {
+      kind,
+      params,
+    },
+  }
+}
+
+export interface GenerateAiChatStreamOptions {
+  fallbackModel: string
+  onChunk: (chunk: string) => void
+  onMeta?: (meta: AiChatStreamMeta) => void
+  signal?: AbortSignal
+}
+
+export async function generateAiChatStream(
+  request: AiChatRequest,
+  options: GenerateAiChatStreamOptions,
+): Promise<AiResult<{ id: string; model: string; finishReason: string | null }>> {
+  try {
+    const response = await invokeAiChatStream(request, { signal: options.signal })
+    return ok(await readStreamResponse(response, options.fallbackModel, options.onChunk, options.onMeta))
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return fail('请求已取消')
+    }
+    const message = error instanceof Error ? error.message : 'AI请求失败'
+    return fail(message)
+  }
+}
+
+export async function invokeAiChatRequest<TResponse>(
+  request: AiChatRequest,
+): Promise<TResponse> {
+  return invokeEdgeFunction<TResponse>('ai-chat', request as unknown as Record<string, unknown>)
+}
+
+export async function invokeAiChatStream(
+  request: AiChatRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<Response> {
+  return fetchEdgeFunctionStream('ai-chat', request, options)
+}
+
 async function readStreamResponse(
   response: Response,
   fallbackModel: string,
   onChunk: (chunk: string) => void,
+  onMeta?: (meta: AiChatStreamMeta) => void,
 ): Promise<{ id: string; model: string; finishReason: string | null }> {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -206,16 +270,25 @@ async function readStreamResponse(
       }
 
       try {
-        const data = JSON.parse(dataText) as OpenAiStreamPayload
-        id = data.id || id
-        model = data.model || model
+        const data = JSON.parse(dataText) as OpenAiStreamPayload | AiChatStreamEnvelope
+        if ((data as AiChatStreamEnvelope).type === 'meta') {
+          onMeta?.({
+            mode: (data as AiChatStreamEnvelope).mode,
+            sources: (data as AiChatStreamEnvelope).sources,
+          })
+          continue
+        }
 
-        const choice = data.choices?.[0]
+        const streamData = data as OpenAiStreamPayload
+        id = streamData.id || id
+        model = streamData.model || model
+
+        const choice = streamData.choices?.[0]
         if (choice?.finish_reason) {
           finishReason = choice.finish_reason
         }
 
-        const content = extractStreamDeltaText(data)
+        const content = extractStreamDeltaText(streamData)
         if (content) {
           onChunk(content)
         }
@@ -262,10 +335,9 @@ export async function generateAiText(
     }
 
     const { signal: _signal, ...requestParams } = params
-    const payload = await invokeEdgeFunction<OpenAiChatCompletionResponse>('ai-chat', {
-      params: requestParams,
-      stream: false,
-    })
+    const payload = await invokeAiChatRequest<OpenAiChatCompletionResponse>(
+      buildAiChatRequest('plain', requestParams, false),
+    )
     const choice = payload?.choices?.[0]
     const text = extractTextFromCompletionPayload(payload).trim()
     if (!text) {
@@ -298,18 +370,11 @@ export async function generateAiTextStream(
     }
 
     const { signal, ...requestParams } = params
-    const response = await fetchEdgeFunctionStream(
-      'ai-chat',
-      {
-        params: requestParams,
-        stream: true,
-      },
-      {
-        signal,
-      },
-    )
+    const response = await invokeAiChatStream(buildAiChatRequest('plain', requestParams, true), {
+      signal,
+    })
 
-    return ok(await readStreamResponse(response, config.model, onChunk))
+    return ok(await readStreamResponse(response, config.model, onChunk, undefined))
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       return fail('请求已取消')

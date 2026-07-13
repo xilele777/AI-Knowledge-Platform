@@ -8,6 +8,18 @@ export interface UserAiConfig {
   updatedAt?: string
 }
 
+export interface AiChatSourceChunk {
+  chunkId: string
+  fileId: string | null
+  documentId: string | null
+  sourceType: 'file' | 'document'
+  sourceName: string | null
+  chunkIndex: number | null
+  content: string
+  score: number
+  matchedKeywords: string[]
+}
+
 export interface AiChatHistoryMessage {
   role: 'user' | 'assistant'
   content: string
@@ -24,6 +36,34 @@ export interface AiGenerateTextParams {
   presencePenalty?: number
   frequencyPenalty?: number
   signal?: AbortSignal
+}
+
+export type AiChatRequestKind = 'plain' | 'knowledge-enhanced'
+
+export type AiChatAnswerMode = 'general-ai' | 'knowledge-enhanced' | 'strict-knowledge'
+
+export interface AiChatStreamMeta {
+  mode?: AiChatAnswerMode
+  sources?: AiChatSourceChunk[]
+}
+
+export interface AiChatRequestPayload {
+  kind: AiChatRequestKind
+  params?: Partial<AiGenerateTextParams>
+  knowledge?: {
+    knowledgeBaseId?: string
+    question: string
+    history?: AiChatHistoryMessage[]
+    systemPrompt?: string
+    answerStyle?: string
+    sources?: AiChatSourceChunk[]
+  }
+}
+
+export interface AiChatRequest {
+  stream?: boolean
+  request?: AiChatRequestPayload
+  params?: AiGenerateTextParams
 }
 
 export interface AiTextResultData {
