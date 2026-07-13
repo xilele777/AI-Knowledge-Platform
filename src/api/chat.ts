@@ -1,12 +1,5 @@
 import { getCurrentUser } from './auth'
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
-import {
-  diffChunkIds,
-  deleteCachedChunks,
-  loadCachedChunks,
-  saveCachedChunks,
-  type CachedKnowledgeChunk,
-} from '../utils/embeddingCache'
 import type {
   ApiResult,
   ChatAnswerMode,
@@ -18,7 +11,6 @@ import type {
   ChatSourceChunk,
   CreateChatInput,
   CreateChatMessageInput,
-  KnowledgeChunkForQa,
 } from '../types/chat'
 
 type ChatRow = {
@@ -43,33 +35,8 @@ type ChatMessageRow = {
   created_at: string
 }
 
-type KnowledgeChunkRow = {
-  id: string
-  knowledge_base_id: string
-  file_id: string | null
-  document_id: string | null
-  source_type: 'file' | 'document' | null
-  chunk_index: number
-  content: string
-  token_count: number | null
-  meta: Record<string, unknown> | null
-  embedding: number[] | null
-  created_at: string
-}
-
-type KnowledgeFileNameRow = {
-  id: string
-  file_name: string
-}
-
-type DocumentTitleRow = {
-  id: string
-  title: string
-}
-
 const CHAT_TABLE = 'chats'
 const CHAT_MESSAGE_TABLE = 'chat_messages'
-const KNOWLEDGE_CHUNK_TABLE = 'knowledge_chunks'
 
 function ok<T>(data?: T): ApiResult<T> {
   return {
@@ -232,49 +199,6 @@ function toChatMessage(row: ChatMessageRow): ChatMessage {
   }
 }
 
-function toKnowledgeChunk(
-  row: KnowledgeChunkRow,
-  fileNameMap: Map<string, string>,
-  documentTitleMap: Map<string, string>,
-): KnowledgeChunkForQa {
-  const cached = toCachedChunk(row)
-  return withSourceName(cached, fileNameMap, documentTitleMap)
-}
-
-/** 数据库行 → 可缓存切片（不含 sourceName，embedding 转 Float32Array） */
-function toCachedChunk(row: KnowledgeChunkRow): CachedKnowledgeChunk {
-  return {
-    id: row.id,
-    knowledgeBaseId: row.knowledge_base_id,
-    fileId: row.file_id,
-    documentId: row.document_id,
-    sourceType: row.source_type === 'document' || row.document_id ? 'document' : 'file',
-    chunkIndex: row.chunk_index,
-    content: row.content,
-    tokenCount: row.token_count,
-    meta: row.meta,
-    embedding: Array.isArray(row.embedding) ? new Float32Array(row.embedding) : null,
-    createdAt: row.created_at,
-  }
-}
-
-/** 补齐 sourceName（文件名/文档标题可变，不进缓存，每次调用新鲜解析） */
-function withSourceName(
-  chunk: CachedKnowledgeChunk,
-  fileNameMap: Map<string, string>,
-  documentTitleMap: Map<string, string>,
-): KnowledgeChunkForQa {
-  const sourceName =
-    chunk.sourceType === 'document'
-      ? chunk.documentId
-        ? documentTitleMap.get(chunk.documentId) ?? null
-        : null
-      : chunk.fileId
-        ? fileNameMap.get(chunk.fileId) ?? null
-        : null
-
-  return { ...chunk, sourceName }
-}
 
 function normalizeTitle(title: string | undefined, fallback = '新会话'): string {
   const value = (title || '').trim()
@@ -475,200 +399,6 @@ export async function createChatMessage(
   }
 }
 
-const QA_CHUNK_SELECT =
-  'id, knowledge_base_id, file_id, document_id, source_type, chunk_index, content, token_count, meta, embedding, created_at'
-
-/** 解析切片来源展示名（文件名 / 文档标题）。查询失败时抛错，由调用方统一兜底。 */
-async function resolveSourceNameMaps(
-  userId: string,
-  chunks: Array<{ fileId: string | null; documentId: string | null }>,
-): Promise<{ fileNameMap: Map<string, string>; documentTitleMap: Map<string, string> }> {
-  const fileIds = Array.from(
-    new Set(chunks.map((item) => item.fileId).filter((item): item is string => Boolean(item))),
-  )
-  const documentIds = Array.from(
-    new Set(chunks.map((item) => item.documentId).filter((item): item is string => Boolean(item))),
-  )
-
-  const [filesResult, documentsResult] = await Promise.all([
-    fileIds.length
-      ? supabase
-        .from('knowledge_files')
-        .select('id, file_name')
-        .eq('owner_id', userId)
-        .in('id', fileIds)
-        .returns<KnowledgeFileNameRow[]>()
-      : Promise.resolve({ data: [] as KnowledgeFileNameRow[], error: null }),
-    documentIds.length
-      ? supabase
-        .from('documents')
-        .select('id, title')
-        .eq('owner_id', userId)
-        .in('id', documentIds)
-        .returns<DocumentTitleRow[]>()
-      : Promise.resolve({ data: [] as DocumentTitleRow[], error: null }),
-  ])
-
-  if (filesResult.error) {
-    throw new Error(filesResult.error.message)
-  }
-
-  if (documentsResult.error) {
-    throw new Error(documentsResult.error.message)
-  }
-
-  return {
-    fileNameMap: new Map((filesResult.data ?? []).map((item) => [item.id, item.file_name])),
-    documentTitleMap: new Map((documentsResult.data ?? []).map((item) => [item.id, item.title])),
-  }
-}
-
-export async function getKnowledgeChunksForQa(
-  knowledgeBaseId: string,
-  limit = 400,
-): Promise<ApiResult<KnowledgeChunkForQa[]>> {
-  try {
-    assertSupabaseConfigured()
-    const userId = await requireUserId()
-
-    if (!knowledgeBaseId) {
-      return fail('knowledgeBaseId 不能为空')
-    }
-
-    const { data, error } = await supabase
-      .from(KNOWLEDGE_CHUNK_TABLE)
-      .select(QA_CHUNK_SELECT)
-      .eq('owner_id', userId)
-      .eq('knowledge_base_id', knowledgeBaseId)
-      .order('chunk_index', { ascending: true })
-      .limit(limit)
-      .returns<KnowledgeChunkRow[]>()
-
-    if (error) {
-      return fail(error.message)
-    }
-
-    const rows = data ?? []
-    const { fileNameMap, documentTitleMap } = await resolveSourceNameMaps(
-      userId,
-      rows.map((row) => ({ fileId: row.file_id, documentId: row.document_id })),
-    )
-
-    return ok(rows.map((item) => toKnowledgeChunk(item, fileNameMap, documentTitleMap)))
-  } catch (error) {
-    return fail(normalizeError(error))
-  }
-}
-
-/**
- * getKnowledgeChunksForQa 的 IndexedDB 缓存版。
- *
- * 切片行不可变（只插入 / 整批删除，从不 update），因此先用一次轻量请求
- * 拉服务端 id 列表，与本地缓存做双向 diff：缺失的增量拉取（含 embedding 的
- * 重请求只发生在新切片上），已删除的本地淘汰。命中缓存时网络流量从 MB 级
- * （500 × 1536 维 JSON 浮点数）降到 KB 级（纯 id 列表）。
- *
- * 缓存层不可用时整体退回全量拉取，行为与非缓存版完全一致。
- */
-export async function getKnowledgeChunksForQaCached(
-  knowledgeBaseId: string,
-  limit = 400,
-): Promise<ApiResult<KnowledgeChunkForQa[]>> {
-  try {
-    assertSupabaseConfigured()
-    const userId = await requireUserId()
-
-    if (!knowledgeBaseId) {
-      return fail('knowledgeBaseId 不能为空')
-    }
-
-    const cached = await loadCachedChunks(knowledgeBaseId)
-    if (cached === null) {
-      return getKnowledgeChunksForQa(knowledgeBaseId, limit)
-    }
-
-    // 1. 轻量请求：只拉 id，确定服务端当前切片集合与顺序
-    const { data: idRows, error: idError } = await supabase
-      .from(KNOWLEDGE_CHUNK_TABLE)
-      .select('id')
-      .eq('owner_id', userId)
-      .eq('knowledge_base_id', knowledgeBaseId)
-      .order('chunk_index', { ascending: true })
-      .limit(limit)
-      .returns<Array<{ id: string }>>()
-
-    if (idError) {
-      return fail(idError.message)
-    }
-
-    const serverIds = (idRows ?? []).map((row) => row.id)
-    if (!serverIds.length) {
-      return ok([])
-    }
-
-    const chunkMap = new Map(cached.map((chunk) => [chunk.id, chunk]))
-    const { missingIds, staleIds } = diffChunkIds(serverIds, chunkMap.keys())
-
-    // 2. 增量拉取缺失切片；缺失过半时退化为整表一次拉取（避免多次分批请求）
-    if (missingIds.length > 0) {
-      const fetchedRows: KnowledgeChunkRow[] = []
-
-      if (missingIds.length >= serverIds.length / 2) {
-        const { data, error } = await supabase
-          .from(KNOWLEDGE_CHUNK_TABLE)
-          .select(QA_CHUNK_SELECT)
-          .eq('owner_id', userId)
-          .eq('knowledge_base_id', knowledgeBaseId)
-          .order('chunk_index', { ascending: true })
-          .limit(limit)
-          .returns<KnowledgeChunkRow[]>()
-
-        if (error) {
-          return fail(error.message)
-        }
-        fetchedRows.push(...(data ?? []))
-      } else {
-        // .in() 走 GET 查询串，id 过多会超 URL 长度限制，分批请求
-        const BATCH_SIZE = 80
-        for (let i = 0; i < missingIds.length; i += BATCH_SIZE) {
-          const { data, error } = await supabase
-            .from(KNOWLEDGE_CHUNK_TABLE)
-            .select(QA_CHUNK_SELECT)
-            .eq('owner_id', userId)
-            .in('id', missingIds.slice(i, i + BATCH_SIZE))
-            .returns<KnowledgeChunkRow[]>()
-
-          if (error) {
-            return fail(error.message)
-          }
-          fetchedRows.push(...(data ?? []))
-        }
-      }
-
-      const fetchedChunks = fetchedRows.map(toCachedChunk)
-      for (const chunk of fetchedChunks) {
-        chunkMap.set(chunk.id, chunk)
-      }
-      void saveCachedChunks(fetchedChunks)
-    }
-
-    // 3. 淘汰服务端已删除的切片（异步，不阻塞检索）
-    if (staleIds.length > 0) {
-      void deleteCachedChunks(staleIds)
-    }
-
-    const ordered = serverIds
-      .map((id) => chunkMap.get(id))
-      .filter((chunk): chunk is CachedKnowledgeChunk => Boolean(chunk))
-
-    // 4. sourceName 可变（重命名），不进缓存，每次新鲜解析
-    const { fileNameMap, documentTitleMap } = await resolveSourceNameMaps(userId, ordered)
-
-    return ok(ordered.map((chunk) => withSourceName(chunk, fileNameMap, documentTitleMap)))
-  } catch (error) {
-    return fail(normalizeError(error))
-  }
-}
 
 export async function deleteChat(chatId: string): Promise<ApiResult<void>> {
   try {

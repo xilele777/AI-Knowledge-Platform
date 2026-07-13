@@ -49,11 +49,24 @@ function fulfillRest(route: Route, rows: Record<string, unknown>[]): Promise<voi
   })
 }
 
-function sseBody(deltas: string[]): string {
-  const events = deltas.map(
-    (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
+
+function aiChatSseBody(options: {
+  meta?: Record<string, unknown>
+  deltas: string[]
+}): string {
+  const parts: string[] = []
+  if (options.meta) {
+    parts.push(`data: ${JSON.stringify({ type: 'meta', ...options.meta })}`)
+  }
+
+  parts.push(
+    ...options.deltas.map(
+      (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
+    ),
   )
-  return [...events, 'data: [DONE]', ''].join('\n\n')
+  parts.push('data: [DONE]')
+  parts.push('')
+  return parts.join('\n\n')
 }
 
 let chatSeq = 0
@@ -133,17 +146,35 @@ async function installBackendMocks(page: Page): Promise<void> {
     fulfillRest(route, []),
   )
 
-  // Edge Function：OpenAI 兼容 SSE 流，带 <think> 推理块
+  // Edge Function：OpenAI 兼容 SSE 流，流前带 authoritative meta 事件，再输出 <think> 推理块
   await page.route(`**/${SUPABASE_HOST}/functions/v1/ai-chat`, (route) =>
     route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: sseBody([
-        '<think>用户在询问平台功能，',
-        '我需要给出结构化介绍。</think>',
-        '## 平台介绍\n\n',
-        '这是一个 **AI 知识库平台**，支持文档管理与智能问答。',
-      ]),
+      body: aiChatSseBody({
+        meta: {
+          mode: 'knowledge-enhanced',
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              fileId: null,
+              documentId: null,
+              sourceType: 'file',
+              sourceName: '平台说明.md',
+              chunkIndex: 0,
+              content: '平台支持文档管理与智能问答。',
+              score: 0.91,
+              matchedKeywords: ['平台', '智能问答'],
+            },
+          ],
+        },
+        deltas: [
+          '<think>用户在询问平台功能，',
+          '我需要给出结构化介绍。</think>',
+          '## 平台介绍\n\n',
+          '这是一个 **AI 知识库平台**，支持文档管理与智能问答。',
+        ],
+      }),
     }),
   )
 }
@@ -176,6 +207,9 @@ test('发送问题后流式渲染回答，思考过程分流到可折叠面板',
   await expect(page.getByRole('heading', { name: '平台介绍' })).toBeVisible()
   await expect(page.getByText('AI 知识库平台，支持文档管理与智能问答', { exact: false })).toBeVisible()
 
+  // authoritative sources 由服务端 meta 事件下发并显示到来源面板
+  await expect(page.getByRole('button', { name: /参考来源（1）/ })).toBeVisible()
+
   // 思考面板存在且流结束后自动收起；点击可展开查看推理内容
   const thinkToggle = page.getByRole('button', { name: '思考过程' })
   await expect(thinkToggle).toBeVisible()
@@ -185,7 +219,21 @@ test('发送问题后流式渲染回答，思考过程分流到可折叠面板',
   await expect(page.getByText('用户在询问平台功能', { exact: false })).toBeVisible()
 })
 
-test('未选择知识库时以纯 AI 模式回答（不请求知识切片）', async ({ page }) => {
+test('未选择知识库时以纯 AI 模式回答（不展示服务端来源）', async ({ page }) => {
+  await page.route(`**/${SUPABASE_HOST}/functions/v1/ai-chat`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: aiChatSseBody({
+        meta: {
+          mode: 'general-ai',
+          sources: [],
+        },
+        deltas: ['你好，这里是纯 AI 回答。'],
+      }),
+    }),
+  )
+
   const chunkRequests: string[] = []
   await page.route(`**/${SUPABASE_HOST}/rest/v1/knowledge_chunks**`, (route) => {
     chunkRequests.push(route.request().url())
@@ -198,6 +246,7 @@ test('未选择知识库时以纯 AI 模式回答（不请求知识切片）', a
   await input.fill('你好')
   await page.getByRole('button', { name: '发送' }).click()
 
-  await expect(page.getByRole('heading', { name: '平台介绍' })).toBeVisible()
+  await expect(page.getByText('你好，这里是纯 AI 回答。')).toBeVisible()
+  await expect(page.getByRole('button', { name: /参考来源/ })).toHaveCount(0)
   expect(chunkRequests).toHaveLength(0)
 })

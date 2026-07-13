@@ -3,34 +3,22 @@ import { ElMessage } from 'element-plus'
 import {
   createChatMessage,
   getChatMessages,
-  getKnowledgeChunksForQaCached,
 } from '@/api/chat'
-import { generateAiTextStream } from '@/api/ai'
+import {
+  generateAiChatStream,
+} from '@/api/ai'
 import { useAiConfigStore } from '@/stores/aiConfig'
 import { track } from '@/utils/tracker'
 import { ANALYTICS_EVENTS } from '@/constants/analyticsEvents'
-import {
-  hasValuableRetrievedChunks,
-  type RetrieveChunkInput,
-  type RetrievedChunk,
-} from '@/utils/retrieveChunks'
-import { createEmbedding } from '@/utils/vectorEmbedding'
-import {
-  findTopSimilarIndicesAsync,
-  retrieveRelevantChunksAsync,
-} from '@/utils/retrievalWorkerClient'
-import { fuseRetrievedChunks } from '@/utils/fuseRetrieval'
-import { rewriteQuestionForRetrieval, shouldRewriteQuestion } from '@/utils/rewriteQuestion'
 import { startQaTimeline } from '@/utils/perfMetrics'
-import type { AiChatHistoryMessage } from '@/types/ai'
-import { buildGeneralAiPrompt, buildKnowledgeEnhancedPrompt } from '@/utils/buildQaPrompt'
+import type { AiChatHistoryMessage, AiChatRequest, AiChatStreamMeta } from '@/types/ai'
+import { buildGeneralAiPrompt } from '@/utils/buildQaPrompt'
 import { buildChatHistory, takeMessagesBeforeLastQuestion } from '@/utils/chatHistory'
 import type {
   ChatAnswerMode,
   ChatMessage,
   ChatMessageStatus,
   ChatSourceChunk,
-  KnowledgeChunkForQa,
 } from '@/types/chat'
 import type { KnowledgeQaConfig } from '@/types/knowledge'
 import type { UseChatSessionReturn } from './useChatSession'
@@ -48,9 +36,8 @@ export interface ChatSessionRefs {
 
 export interface PreparedQaRun {
   mode: ChatAnswerMode
-  prompt: string
-  sources: ChatSourceChunk[]
-  contextChunks: ChatSourceChunk[]
+  question: string
+  knowledgeBaseId: string | null
 }
 
 export interface UseChatMessagesReturn {
@@ -68,38 +55,6 @@ export interface UseChatMessagesReturn {
 
 // ─── 工具函数（从 ChatView 提取） ───
 
-function toSourceChunks(items: RetrievedChunk<RetrieveChunkInput>[]): ChatSourceChunk[] {
-  return items.map((item) => ({
-    chunkId: String(item.id ?? ''),
-    fileId: typeof item.fileId === 'string' ? item.fileId : null,
-    documentId: typeof item.documentId === 'string' ? item.documentId : null,
-    sourceType: item.sourceType === 'document' ? 'document' : 'file',
-    sourceName: typeof item.sourceName === 'string' ? item.sourceName : null,
-    chunkIndex: typeof item.chunkIndex === 'number' ? item.chunkIndex : null,
-    content: String(item.content ?? ''),
-    score: item.score,
-    matchedKeywords: item.matchedKeywords,
-  }))
-}
-
-function mapChunksToRetrieveInputs(chunks: KnowledgeChunkForQa[]): RetrieveChunkInput[] {
-  return chunks.map((item) => ({
-    id: item.id,
-    fileId: item.fileId,
-    documentId: item.documentId,
-    sourceType: item.sourceType,
-    sourceName: item.sourceName,
-    chunkIndex: item.chunkIndex,
-    content: item.content,
-  }))
-}
-
-function hasValuableVectorChunks(chunks: RetrievedChunk<RetrieveChunkInput>[]): boolean {
-  if (chunks.length === 0) return false
-  const topScore = chunks[0]?.score ?? 0
-  const averageScore = chunks.reduce((total, item) => total + item.score, 0) / chunks.length
-  return topScore >= 0.2 && averageScore >= 0.12
-}
 
 function buildLocalPendingMessage(input: {
   role: ChatMessage['role']
@@ -179,133 +134,16 @@ export function useChatMessages(session: ChatSessionRefs) {
     question: string,
     knowledgeBaseId: string | null,
     qaConfig: KnowledgeQaConfig,
-    history: AiChatHistoryMessage[] = [],
+    _history: AiChatHistoryMessage[] = [],
   ): Promise<PreparedQaRun> {
-    let retrieved: RetrievedChunk<RetrieveChunkInput>[] = []
-    let vectorValuable = false
-    let keywordValuable = false
-    const shouldRetrieveKnowledge = qaConfig.useKnowledgeEnhanced && Boolean(knowledgeBaseId)
+    const mode: ChatAnswerMode =
+      qaConfig.useKnowledgeEnhanced && Boolean(knowledgeBaseId) ? 'knowledge-enhanced' : 'general-ai'
 
-    if (shouldRetrieveKnowledge && knowledgeBaseId) {
-      // 多轮指代消解：追问句（「那它怎么部署？」）直接检索会失效，
-      // 满足触发条件时先用一次低成本 LLM 调用改写为自包含问题。
-      // 改写只用于检索，展示与落库仍是用户原句；失败/超时降级原句。
-      let retrievalQuestion = question
-      if (shouldRewriteQuestion(question, history.length) && aiConfigStore.isComplete) {
-        try {
-          const config = await aiConfigStore.ensureConfig()
-          retrievalQuestion = await rewriteQuestionForRetrieval(question, history, config)
-        } catch {
-          retrievalQuestion = question
-        }
-      }
-
-      // 缓存版取数：切片 embedding 命中 IndexedDB 时只发一次轻量 id 请求
-      const chunkResult = await getKnowledgeChunksForQaCached(knowledgeBaseId, 500)
-      if (!chunkResult.success || !chunkResult.data) {
-        throw new Error(chunkResult.error || '查询知识切片失败')
-      }
-
-      const chunks = chunkResult.data
-      const chunksWithEmbeddings = chunks.filter(
-        (chunk): chunk is KnowledgeChunkForQa & { embedding: Float32Array } =>
-          chunk.embedding instanceof Float32Array && chunk.embedding.length > 0,
-      )
-
-      // 双路并行检索：向量懂语义改述，关键词擅长专有名词精确匹配，
-      // 各取 top8 交给 RRF 融合，而不是旧的「向量低质才整体切关键词」二选一
-      const vectorTask = (async (): Promise<RetrievedChunk<RetrieveChunkInput>[]> => {
-        if (chunksWithEmbeddings.length === 0 || !aiConfigStore.isComplete) {
-          return []
-        }
-
-        try {
-          const config = await aiConfigStore.ensureConfig()
-          const embeddingResult = await createEmbedding(retrievalQuestion, config)
-          const queryEmbedding = new Float32Array(embeddingResult.embedding)
-
-          // 相似度计算下放 Web Worker：切片向量打包为单个矩阵后
-          // Transferable 零拷贝移交，避免大知识库时长任务阻塞主线程
-          const hits = await findTopSimilarIndicesAsync(
-            queryEmbedding,
-            chunksWithEmbeddings.map((chunk) => chunk.embedding),
-            8,
-            0.1,
-          )
-
-          return hits.map((hit) => {
-            const chunk = chunksWithEmbeddings[hit.index]
-            return {
-              id: chunk.id,
-              fileId: chunk.fileId,
-              documentId: chunk.documentId,
-              sourceType: chunk.sourceType,
-              sourceName: chunk.sourceName,
-              chunkIndex: chunk.chunkIndex,
-              content: chunk.content,
-              score: hit.similarity,
-              hitCount: 0,
-              matchedKeywords: [],
-            }
-          })
-        } catch (error) {
-          // 向量路失败不阻塞回答：关键词路兜底
-          console.warn('[chat.prepareSmartQa] embedding retrieval failed, fallback:', error)
-          return []
-        }
-      })()
-
-      const keywordTask = retrieveRelevantChunksAsync(
-        retrievalQuestion,
-        mapChunksToRetrieveInputs(chunks),
-        {
-          topK: 8,
-          minScore: 0.03,
-        },
-      ).catch((error): RetrievedChunk<RetrieveChunkInput>[] => {
-        console.warn('[chat.prepareSmartQa] keyword retrieval failed:', error)
-        return []
-      })
-
-      const [vectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask])
-
-      // 质量门槛按各路自己的量纲判断（余弦相似度 vs 关键词密度分），任一路达标即视为有价值
-      vectorValuable = hasValuableVectorChunks(vectorResults)
-      keywordValuable = hasValuableRetrievedChunks(keywordResults, {
-        minTopScore: 0.1,
-        minHitCount: 2,
-        minAverageScore: 0.06,
-      })
-
-      if (vectorResults.length > 0 && keywordResults.length > 0) {
-        retrieved = fuseRetrievedChunks(vectorResults, keywordResults, { topK: 5 })
-      } else if (vectorResults.length > 0) {
-        retrieved = vectorResults.slice(0, 5)
-      } else {
-        retrieved = keywordResults.slice(0, 5)
-      }
+    return {
+      mode,
+      question,
+      knowledgeBaseId,
     }
-
-    const hasValuableSources = retrieved.length > 0 && (vectorValuable || keywordValuable)
-
-    const useKnowledgeEnhancedMode = shouldRetrieveKnowledge && hasValuableSources
-    const mode: ChatAnswerMode = useKnowledgeEnhancedMode ? 'knowledge-enhanced' : 'general-ai'
-    const usedChunks = hasValuableSources ? retrieved : []
-
-    const prompt =
-      mode === 'knowledge-enhanced'
-        ? buildKnowledgeEnhancedPrompt(question, usedChunks, {
-            systemInstruction: qaConfig.systemPrompt || undefined,
-            answerStyle: qaConfig.answerStyle || undefined,
-          })
-        : buildGeneralAiPrompt(question, {
-            systemInstruction: qaConfig.systemPrompt || undefined,
-            answerStyle: qaConfig.answerStyle || undefined,
-          })
-
-    const sources = toSourceChunks(usedChunks)
-
-    return { mode, prompt, sources, contextChunks: sources }
   }
 
   // ─── 持久化 AI 回答 ───
@@ -371,7 +209,7 @@ export function useChatMessages(session: ChatSessionRefs) {
       content: '',
       chatId: input.chatId,
       status: 'streaming',
-      sources: prepared.sources,
+      sources: [],
       answerMode: prepared.mode,
     })
 
@@ -401,10 +239,60 @@ export function useChatMessages(session: ChatSessionRefs) {
         throw new Error(`请先在个人中心配置 AI API 信息：${aiConfigStore.missingFields.join('、')}`)
       }
 
-      const result = await generateAiTextStream(
-        { userPrompt: prepared.prompt, history, signal: abortController.signal },
-        config,
-        (chunk) => {
+      let request: AiChatRequest
+      if (prepared.mode === 'knowledge-enhanced') {
+        request = {
+          stream: true,
+          request: {
+            kind: 'knowledge-enhanced',
+            params: {
+              temperature: 0.7,
+              history,
+            },
+            knowledge: {
+              knowledgeBaseId: prepared.knowledgeBaseId || undefined,
+              question: prepared.question,
+              history,
+              systemPrompt: input.qaConfig.systemPrompt || undefined,
+              answerStyle: input.qaConfig.answerStyle || undefined,
+            },
+          },
+        }
+      } else {
+        request = {
+          stream: true,
+          request: {
+            kind: 'plain',
+            params: {
+              userPrompt: buildGeneralAiPrompt(prepared.question, {
+                systemInstruction: input.qaConfig.systemPrompt || undefined,
+                answerStyle: input.qaConfig.answerStyle || undefined,
+              }),
+              history,
+              temperature: 0.7,
+            },
+          },
+        }
+      }
+
+      const result = await generateAiChatStream(request, {
+        fallbackModel: config.model,
+        signal: abortController.signal,
+        onMeta: (meta: AiChatStreamMeta) => {
+          if (Array.isArray(meta.sources)) {
+            updateMessageById(localAssistantMessage.id, (message) => ({
+              ...message,
+              sources: meta.sources as ChatSourceChunk[],
+              answerMode: meta.mode ?? message.answerMode ?? prepared.mode,
+            }))
+          } else if (meta.mode) {
+            updateMessageById(localAssistantMessage.id, (message) => ({
+              ...message,
+              answerMode: meta.mode ?? message.answerMode ?? prepared.mode,
+            }))
+          }
+        },
+        onChunk: (chunk) => {
           if (!finalText) {
             perf.lap('first_token')
           }
@@ -413,7 +301,7 @@ export function useChatMessages(session: ChatSessionRefs) {
             pendingFrame = requestAnimationFrame(flushStreamingText)
           }
         },
-      )
+      })
       perf.lap('stream_done')
 
       if (!result.success && !abortController.signal.aborted) {
@@ -452,12 +340,20 @@ export function useChatMessages(session: ChatSessionRefs) {
       errorMessage: finalErrorMessage,
     }))
 
+    const currentAssistantMeta = () => {
+      const current = messages.value.find((item) => item.id === localAssistantMessage.id)
+      return {
+        mode: (current?.answerMode ?? prepared.mode) as ChatAnswerMode,
+        sources: current?.sources ?? [],
+      }
+    }
+
     const savedAssistant = await persistAssistantFinal({
       chatId: input.chatId,
       localMessageId: localAssistantMessage.id,
       content: finalText,
-      mode: prepared.mode,
-      sources: prepared.sources,
+      mode: currentAssistantMeta().mode,
+      sources: currentAssistantMeta().sources,
       status: finalStatus,
       errorMessage: finalErrorMessage,
     })
@@ -478,10 +374,10 @@ export function useChatMessages(session: ChatSessionRefs) {
         chat_id: input.chatId,
         knowledge_base_id: session.selectedKnowledgeBaseId.value || null,
         question_length: input.trackQuestionLength ?? input.question.length,
-        qa_mode: prepared.mode,
+        qa_mode: currentAssistantMeta().mode,
         qa_ai_provider: input.qaConfig.aiProvider,
         qa_use_knowledge_enhanced: input.qaConfig.useKnowledgeEnhanced,
-        source_count: prepared.sources.length,
+        source_count: currentAssistantMeta().sources.length,
         answer_length: finalText.length,
         model: '',
         total_tokens: null,
@@ -489,8 +385,8 @@ export function useChatMessages(session: ChatSessionRefs) {
     }
 
     perf.finish({
-      qa_mode: prepared.mode,
-      source_count: prepared.sources.length,
+      qa_mode: currentAssistantMeta().mode,
+      source_count: currentAssistantMeta().sources.length,
       answer_length: finalText.length,
       status: finalStatus,
       aborted: abortController.signal.aborted,

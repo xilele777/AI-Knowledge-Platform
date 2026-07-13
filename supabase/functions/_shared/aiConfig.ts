@@ -1,10 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.103.3'
-
-export type AiResolvedConfig = {
-  baseUrl: string
-  apiKey: string
-  model: string
-}
+import {
+  normalizeBaseUrl,
+  resolveDefaultModel,
+  resolveEmbeddingModel,
+} from '../../../shared/aiConfigCore.ts'
 
 type UserAiConfigRow = {
   api_base_url: string | null
@@ -12,21 +11,10 @@ type UserAiConfigRow = {
   model: string | null
 }
 
-const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
-const DEFAULT_MODEL = 'gpt-4o-mini'
-const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small'
-
-function normalizeBaseUrl(value: string | null | undefined): string {
-  const trimmed = (value || DEFAULT_BASE_URL).trim()
-  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed
-}
-
-export function resolveEmbeddingModel(model: string): string {
-  const normalized = model.trim()
-  if (normalized.toLowerCase().includes('embedding')) {
-    return normalized
-  }
-  return DEFAULT_EMBEDDING_MODEL
+export type AiResolvedConfig = {
+  baseUrl: string
+  apiKey: string
+  model: string
 }
 
 export async function resolveUserAiConfig(authHeader: string): Promise<AiResolvedConfig> {
@@ -67,7 +55,8 @@ export async function resolveUserAiConfig(authHeader: string): Promise<AiResolve
   return {
     baseUrl: normalizeBaseUrl(data.api_base_url),
     apiKey: data.api_key.trim(),
-    model: (data.model || DEFAULT_MODEL).trim(),
+    model: resolveDefaultModel(data.model),
   }
 }
 
+export { resolveEmbeddingModel }

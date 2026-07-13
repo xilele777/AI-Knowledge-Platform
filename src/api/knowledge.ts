@@ -251,6 +251,14 @@ function inferFileType(fileName: string, mimeType: string | null | undefined): s
   return 'txt'
 }
 
+function toPgvectorLiteral(value: number[] | null | undefined): string | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null
+  }
+
+  return `[${value.join(',')}]`
+}
+
 async function requireUserId(): Promise<string> {
   const user = await getCurrentUser()
 
@@ -745,6 +753,7 @@ export async function batchInsertKnowledgeChunks(
         chunksWithEmbeddings = input.chunks.map((chunk, index) => ({
           ...chunk,
           embedding: embeddings[index].embedding,
+          embeddingVector: embeddings[index].embedding,
         }))
         embeddingStatus = 'generated'
       } catch (error) {
@@ -765,6 +774,7 @@ export async function batchInsertKnowledgeChunks(
       token_count: chunk.tokenCount ?? null,
       meta: chunk.meta ?? null,
       embedding: chunk.embedding ?? null,
+      embedding_vector: toPgvectorLiteral(chunk.embeddingVector ?? chunk.embedding ?? null),
     }))
 
     const { data, error } = await supabase
