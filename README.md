@@ -217,4 +217,5 @@ supabase/
 
 ## 文档
 
-- [docs/project-development-manual.md](docs/project-development-manual.md) — 项目开发全手册：架构、数据流、核心逻辑、风险边界与面试话术
+- [docs/resume-interview-handbook.md](docs/resume-interview-handbook.md) — 求职面试手册（单一入口）：简历定稿、实测数据、亮点详解、问答话术、架构与链路底牌、文件地图
+- [docs/top5-highlights-analysis.md](docs/top5-highlights-analysis.md) — 五大亮点论证与学习指南：筛选逻辑、追问清单、自测题与学习路径
