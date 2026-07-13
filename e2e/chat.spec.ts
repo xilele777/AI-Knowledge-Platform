@@ -49,12 +49,6 @@ function fulfillRest(route: Route, rows: Record<string, unknown>[]): Promise<voi
   })
 }
 
-function sseBody(deltas: string[]): string {
-  const events = deltas.map(
-    (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
-  )
-  return [...events, 'data: [DONE]', ''].join('\n\n')
-}
 
 function aiChatSseBody(options: {
   meta?: Record<string, unknown>
