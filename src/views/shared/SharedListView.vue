@@ -5,7 +5,8 @@ import { Grid, List } from '@element-plus/icons-vue'
 import SharedDocumentCard from './components/SharedDocumentCard.vue'
 import { getSharedDocuments } from '../../api/documents'
 import type { DocumentListItem } from '../../types/document'
-import GradientTitle from '@/components/shared/GradientTitle.vue'
+import PageContainer from '@/components/shared/PageContainer.vue'
+import SearchInput from '@/components/shared/SearchInput.vue'
 import CapsuleTabs from '@/components/shared/CapsuleTabs.vue'
 import RankBadge from '@/components/shared/RankBadge.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
@@ -77,52 +78,39 @@ void loadDocuments()
 </script>
 
 <template>
-  <div class="shared-page">
-    <!-- 头部 -->
-    <div class="shared-header">
-      <GradientTitle
-        title="共享广场"
-        subtitle="Share Space"
-        description="发现和浏览其他用户分享的优质文档"
-        :gradient="'var(--gradient-orange)'"
+  <PageContainer
+    width="default"
+    title="共享广场"
+    description="发现和浏览其他用户分享的优质文档"
+  >
+    <template #actions>
+      <SearchInput
+        v-model="searchKeyword"
+        placeholder="搜索共享文档..."
+        @clear="handleSearch"
+        @keyup.enter="handleSearch"
       />
-      <div class="header-controls">
-        <div class="search-bar">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索共享文档..."
-            size="large"
-            clearable
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-            class="search-input"
-          >
-            <template #prefix>
-              <el-icon><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></el-icon>
-            </template>
-          </el-input>
-        </div>
-        <div class="sort-row">
-          <CapsuleTabs v-model="sortBy" :tabs="sortTabs" color="var(--module-shared)" />
-          <div class="view-toggle">
-            <el-button
-              circle
-              :type="viewMode === 'grid' ? 'primary' : 'default'"
-              size="small"
-              @click="viewMode = 'grid'"
-            >
-              <el-icon><Grid /></el-icon>
-            </el-button>
-            <el-button
-              circle
-              :type="viewMode === 'list' ? 'primary' : 'default'"
-              size="small"
-              @click="viewMode = 'list'"
-            >
-              <el-icon><List /></el-icon>
-            </el-button>
-          </div>
-        </div>
+    </template>
+
+    <div class="sort-row">
+      <CapsuleTabs v-model="sortBy" :tabs="sortTabs" color="var(--module-shared)" />
+      <div class="view-toggle">
+        <el-button
+          circle
+          :type="viewMode === 'grid' ? 'primary' : 'default'"
+          size="small"
+          @click="viewMode = 'grid'"
+        >
+          <el-icon><Grid /></el-icon>
+        </el-button>
+        <el-button
+          circle
+          :type="viewMode === 'list' ? 'primary' : 'default'"
+          size="small"
+          @click="viewMode = 'list'"
+        >
+          <el-icon><List /></el-icon>
+        </el-button>
       </div>
     </div>
 
@@ -190,58 +178,17 @@ void loadDocuments()
         </div>
       </div>
     </div>
-  </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.shared-page {
-  padding: 4px;
-}
-
-/* ── 头部 ── */
-.shared-header {
-  margin-bottom: 32px;
-}
-
-.shared-header :deep(.gradient-title-wrapper) {
-  margin-bottom: 24px;
-}
-
-.header-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.search-bar {
-  max-width: 520px;
-}
-
-.search-input :deep(.el-input__wrapper) {
-  border-radius: 9999px;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface-container-lowest);
-  transition: box-shadow var(--md-sys-transition-fast) ease,
-              border-color var(--md-sys-transition-fast) ease;
-}
-
-.search-input :deep(.el-input__wrapper:hover) {
-  border-color: var(--md-sys-color-outline);
-  box-shadow: var(--shadow-md);
-}
-
-.search-input :deep(.el-input__wrapper.is-focus) {
-  border-color: var(--module-shared);
-  box-shadow: 0 0 0 3px rgba(255, 109, 1, 0.12), var(--shadow-md);
-}
-
 .sort-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+  margin-bottom: 16px;
 }
 
 .view-toggle {

@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.103.3'
-import { resolveEmbeddingModel, resolveUserAiConfig } from './aiConfig.ts'
+import { resolveSystemEmbeddingConfig } from './aiConfig.ts'
 
 type ChunkRow = {
   id: string
@@ -236,8 +236,8 @@ export async function matchKnowledgeChunksByVector(
   }))
 }
 
-export async function createQueryEmbedding(authHeader: string, question: string): Promise<number[]> {
-  const config = await resolveUserAiConfig(authHeader)
+export async function createQueryEmbedding(_authHeader: string, question: string): Promise<number[]> {
+  const config = await resolveSystemEmbeddingConfig()
   const upstream = await fetch(`${config.baseUrl}/embeddings`, {
     method: 'POST',
     headers: {
@@ -246,7 +246,7 @@ export async function createQueryEmbedding(authHeader: string, question: string)
     },
     body: JSON.stringify({
       input: question,
-      model: resolveEmbeddingModel(config.model),
+      model: config.model,
     }),
   })
 

@@ -1,5 +1,7 @@
 import { createApp } from 'vue'
 import 'element-plus/theme-chalk/dark/css-vars.css'
+import 'element-plus/theme-chalk/el-message.css'
+import 'element-plus/theme-chalk/el-message-box.css'
 import './styles/theme.css'
 import './styles/element-plus-overrides.css'
 import './style.css'

@@ -1,5 +1,5 @@
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts'
-import { resolveEmbeddingModel, resolveUserAiConfig } from '../_shared/aiConfig.ts'
+import { assertAuthenticated, resolveSystemEmbeddingConfig } from '../_shared/aiConfig.ts'
 
 type EmbeddingRequestBody = {
   input?: string | string[]
@@ -30,7 +30,9 @@ Deno.serve(async (request) => {
       return errorResponse('input is required', 400)
     }
 
-    const config = await resolveUserAiConfig(authHeader)
+    await assertAuthenticated(authHeader)
+
+    const config = await resolveSystemEmbeddingConfig()
     const upstream = await fetch(`${config.baseUrl}/embeddings`, {
       method: 'POST',
       headers: {
@@ -39,7 +41,7 @@ Deno.serve(async (request) => {
       },
       body: JSON.stringify({
         input,
-        model: resolveEmbeddingModel(config.model),
+        model: config.model,
       }),
     })
 

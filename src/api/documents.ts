@@ -83,6 +83,7 @@ function toDocumentListItem(row: DocumentRow & { owner_name?: string }): Documen
   return {
     id: row.id,
     title: row.title,
+    characterCount: row.content_md.replace(/\s/g, '').length,
     status: row.status,
     isShared: row.is_shared,
     sharedAt: row.shared_at,

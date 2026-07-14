@@ -2,10 +2,11 @@
 import { computed, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { createKnowledgeBase, deleteKnowledgeBase, getMyKnowledgeBases } from '../../api/knowledge'
 import type { CreateKnowledgeBaseInput, KnowledgeBaseListItem } from '../../types/knowledge'
-import GradientTitle from '@/components/shared/GradientTitle.vue'
+import PageContainer from '@/components/shared/PageContainer.vue'
+import SearchInput from '@/components/shared/SearchInput.vue'
 import KnowledgeCard from './components/KnowledgeCard.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
@@ -18,6 +19,7 @@ interface CreateKbForm {
 }
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const deleting = ref(false)
@@ -159,34 +161,25 @@ function handleEnterDetail(id: string) {
   router.push('/knowledge/' + id)
 }
 
+if (route.query.create === '1') {
+  openCreateDialog()
+  void router.replace({ path: route.path, query: { ...route.query, create: undefined } })
+}
+
 void loadKnowledgeBases()
 </script>
 
 <template>
-  <div class="knowledge-list-page">
-    <div class="page-header">
-      <GradientTitle
-        title="知识库"
-        subtitle="Knowledge Base"
-        description="管理你的知识库，上传文档并开启 AI 智能问答"
-        :gradient="'var(--gradient-green)'"
-      />
-      <div class="page-actions">
-        <el-input
-          v-model="searchKeyword"
-          placeholder="搜索知识库..."
-          size="large"
-          clearable
-          class="search-input"
-        >
-          <template #prefix>
-            <el-icon><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></el-icon>
-          </template>
-        </el-input>
-        <el-button @click="loadKnowledgeBases">刷新</el-button>
-        <el-button type="primary" size="large" @click="openCreateDialog">新建知识库</el-button>
-      </div>
-    </div>
+  <PageContainer
+    width="default"
+    title="知识库"
+    description="管理你的知识库，上传文档并开启 AI 智能问答"
+  >
+    <template #actions>
+      <SearchInput v-model="searchKeyword" placeholder="搜索知识库..." />
+      <el-button @click="loadKnowledgeBases">刷新</el-button>
+      <el-button type="primary" @click="openCreateDialog">新建知识库</el-button>
+    </template>
 
     <el-alert
       v-if="errorMessage"
@@ -248,57 +241,12 @@ void loadKnowledgeBases()
         <el-button type="primary" :loading="creating" @click="handleCreateKnowledgeBase">创建</el-button>
       </template>
     </el-dialog>
-  </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.knowledge-list-page {
-  padding: 4px;
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 32px;
-  flex-wrap: wrap;
-}
-
-.page-header :deep(.gradient-title-wrapper) {
-  margin-bottom: 0;
-}
-
-.page-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.search-input {
-  width: 240px;
-}
-
-.search-input :deep(.el-input__wrapper) {
-  border-radius: 9999px;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface-container-lowest);
-  box-shadow: var(--shadow-sm);
-  transition: all var(--md-sys-transition-fast) ease;
-}
-
-.search-input :deep(.el-input__wrapper:hover) {
-  border-color: var(--md-sys-color-outline);
-}
-
-.search-input :deep(.el-input__wrapper.is-focus) {
-  border-color: var(--module-knowledge);
-  box-shadow: 0 0 0 3px rgba(15, 157, 88, 0.12), var(--shadow-md);
-}
-
 .error-alert {
-  margin-top: 12px;
+  margin-bottom: 16px;
 }
 
 .content-wrapper {
@@ -309,16 +257,5 @@ void loadKnowledgeBases()
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 20px;
-}
-
-@media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .page-actions {
-    justify-content: flex-end;
-  }
 }
 </style>

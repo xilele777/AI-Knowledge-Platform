@@ -2,11 +2,12 @@
 import { reactive, ref, computed } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import DocumentCard from './components/DocumentCard.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
-import GradientTitle from '@/components/shared/GradientTitle.vue'
+import PageContainer from '@/components/shared/PageContainer.vue'
+import SearchInput from '@/components/shared/SearchInput.vue'
 import CapsuleTabs from '@/components/shared/CapsuleTabs.vue'
 import {
   createDocument,
@@ -23,6 +24,7 @@ interface CreateForm {
 }
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const submitting = ref(false)
 const statusFilter = ref<string>('all')
@@ -163,39 +165,32 @@ const handleDeleteDoc = async (id: string) => {
   }
 }
 
+if (route.query.create === '1') {
+  openCreateDialog()
+  void router.replace({ path: route.path, query: { ...route.query, create: undefined } })
+}
+
 void loadDocuments()
 </script>
 
 <template>
-  <div class="docs-page">
-    <div class="docs-header">
-      <GradientTitle
-        title="我的文档"
-        subtitle="Documents"
-        description="创建、编辑和管理你的知识文档"
-        :gradient="'var(--gradient-blue)'"
+  <PageContainer
+    width="default"
+    title="我的文档"
+    description="创建、编辑和管理你的知识文档"
+  >
+    <template #actions>
+      <SearchInput
+        v-model="searchKeyword"
+        placeholder="按标题搜索..."
+        @clear="handleSearch"
+        @keyup.enter="handleSearch"
       />
-      <div class="header-row">
-        <CapsuleTabs v-model="statusFilter" :tabs="statusTabs" color="var(--module-docs)" />
-        <div class="header-actions">
-          <div class="search-bar">
-            <el-input
-              v-model="searchKeyword"
-              placeholder="按标题搜索..."
-              size="large"
-              clearable
-              @clear="handleSearch"
-              @keyup.enter="handleSearch"
-              class="search-input"
-            >
-              <template #prefix>
-                <el-icon><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></el-icon>
-              </template>
-            </el-input>
-          </div>
-          <el-button type="primary" size="large" @click="openCreateDialog">新建文档</el-button>
-        </div>
-      </div>
+      <el-button type="primary" @click="openCreateDialog">新建文档</el-button>
+    </template>
+
+    <div class="filter-row">
+      <CapsuleTabs v-model="statusFilter" :tabs="statusTabs" color="var(--module-docs)" />
     </div>
 
     <el-alert
@@ -248,65 +243,23 @@ void loadDocuments()
         <el-button type="primary" :loading="submitting" @click="handleCreate">创建并进入编辑</el-button>
       </template>
     </el-dialog>
-  </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.docs-page {
-  padding: 4px;
-}
-
-/* ── 头部 ── */
-.docs-header {
-  margin-bottom: 32px;
-}
-
-.docs-header :deep(.gradient-title-wrapper) {
-  margin-bottom: 20px;
-}
-
-.header-row {
+.filter-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  flex-wrap: wrap;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.search-bar {
-  width: 240px;
-}
-
-.search-input :deep(.el-input__wrapper) {
-  border-radius: 9999px;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface-container-lowest);
-  box-shadow: var(--shadow-sm);
-  transition: all var(--md-sys-transition-fast) ease;
-}
-
-.search-input :deep(.el-input__wrapper:hover) {
-  border-color: var(--md-sys-color-outline);
-}
-
-.search-input :deep(.el-input__wrapper.is-focus) {
-  border-color: var(--module-docs);
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12), var(--shadow-md);
+  margin-bottom: 16px;
 }
 
 .error-alert {
-  margin-top: 12px;
+  margin-bottom: 16px;
 }
 
 .docs-content {
-  margin-top: 16px;
   min-height: 240px;
 }
 
@@ -314,12 +267,5 @@ void loadDocuments()
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 20px;
-}
-
-@media (max-width: 768px) {
-  .docs-topbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 </style>

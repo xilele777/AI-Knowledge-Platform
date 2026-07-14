@@ -1,23 +1,40 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Setting, Document, DataAnalysis, Key } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useAiConfigStore } from '@/stores/aiConfig'
 import { saveUserAiConfig, deleteUserAiConfig } from '@/api/userAiConfig'
+import { getSystemAiConfig, saveSystemAiConfig } from '@/api/systemAiConfig'
 import { getMyDocuments } from '@/api/documents'
-import type { UserAiConfig } from '@/types/ai'
+import type { UserAiConfig, SystemAiConfig } from '@/types/ai'
 import { resolveAiConfigFromUserConfig, isAiConfigComplete } from '@/utils/aiConfig'
-import GradientTitle from '@/components/shared/GradientTitle.vue'
+import { testChatApi, testEmbeddingApi, type ConnectivityResult } from '@/utils/aiConnectivity'
 
 const userStore = useUserStore()
 const aiConfigStore = useAiConfigStore()
 
-const activeTab = ref<'overview' | 'aiConfig'>('overview')
+type TabKey = 'aiConfig' | 'systemEmbedding'
+const activeTab = ref<TabKey>('aiConfig')
+
+const tabs = computed(() => {
+  const items: Array<{ key: TabKey; label: string }> = [{ key: 'aiConfig', label: 'AI 配置' }]
+  if (userStore.isAdmin) {
+    items.push({ key: 'systemEmbedding', label: '系统向量' })
+  }
+  return items
+})
+
+function switchTab(key: TabKey) {
+  activeTab.value = key
+  if (key === 'systemEmbedding') {
+    loadSystemConfig()
+  }
+}
+
+// ── 用户对话 API 配置 ──
 const loading = ref(false)
 const saving = ref(false)
 const docCount = ref<number>(0)
-const overviewLoading = ref(false)
 
 const config = ref<UserAiConfig>({
   apiBaseUrl: '',
@@ -30,15 +47,12 @@ const isConfigComplete = computed(() => {
   return isAiConfigComplete(resolved)
 })
 
-async function loadOverview() {
-  overviewLoading.value = true
+async function loadDocCount() {
   try {
     const result = await getMyDocuments()
     docCount.value = result.success ? (result.data?.length ?? 0) : 0
   } catch {
     // silently fail
-  } finally {
-    overviewLoading.value = false
   }
 }
 
@@ -83,6 +97,7 @@ async function clearConfig() {
     if (result.success) {
       config.value = { apiBaseUrl: '', apiKey: '', model: '' }
       aiConfigStore.setConfig(config.value)
+      chatTestResult.value = null
       ElMessage.success('配置已清除')
     } else {
       ElMessage.error(result.error || '清除失败')
@@ -92,6 +107,114 @@ async function clearConfig() {
   }
 }
 
+// ── 系统向量配置（仅管理员）──
+const sysConfig = ref<SystemAiConfig>({
+  embeddingBaseUrl: '',
+  embeddingApiKey: '',
+  embeddingModel: '',
+})
+const sysLoading = ref(false)
+const sysSaving = ref(false)
+// 是否已有生效配置：已配置后再修改会导致存量向量与新模型不兼容，需要二次确认
+const sysConfigured = ref(false)
+
+async function loadSystemConfig() {
+  sysLoading.value = true
+  try {
+    const result = await getSystemAiConfig()
+    if (result.success && result.data) {
+      sysConfig.value = {
+        embeddingBaseUrl: result.data.embeddingBaseUrl || '',
+        embeddingApiKey: result.data.embeddingApiKey || '',
+        embeddingModel: result.data.embeddingModel || '',
+      }
+      sysConfigured.value = Boolean(result.data.embeddingApiKey)
+    } else if (!result.success) {
+      ElMessage.error(result.error || '加载系统向量配置失败')
+    }
+  } finally {
+    sysLoading.value = false
+  }
+}
+
+async function saveSystemConfig() {
+  if (sysConfigured.value) {
+    try {
+      await ElMessageBox.confirm(
+        '系统已存在生效的向量配置。修改向量模型后，之前入库的所有文档向量将与新模型不兼容，检索会失效，必须重新构建全部向量索引。确定要修改吗？',
+        '高风险操作',
+        {
+          confirmButtonText: '我已了解风险，继续修改',
+          cancelButtonText: '取消',
+          type: 'warning',
+        },
+      )
+    } catch {
+      return
+    }
+  }
+
+  sysSaving.value = true
+  try {
+    const result = await saveSystemAiConfig(sysConfig.value)
+    if (result.success) {
+      sysConfigured.value = Boolean(sysConfig.value.embeddingApiKey?.trim())
+      ElMessage.success('系统向量配置保存成功')
+    } else {
+      ElMessage.error(result.error || '保存失败')
+    }
+  } catch {
+    ElMessage.error('保存系统向量配置失败')
+  } finally {
+    sysSaving.value = false
+  }
+}
+
+// ── 连通性测试 ──
+// 与 supabase/sql/014 中 pgvector 列的维度保持一致
+const EXPECTED_EMBEDDING_DIMENSION = 1024
+
+const testingChat = ref(false)
+const chatTestResult = ref<ConnectivityResult | null>(null)
+const testingSys = ref(false)
+const sysTestResult = ref<ConnectivityResult | null>(null)
+
+async function runChatTest() {
+  testingChat.value = true
+  chatTestResult.value = null
+  try {
+    chatTestResult.value = await testChatApi({
+      baseUrl: config.value.apiBaseUrl,
+      apiKey: config.value.apiKey,
+      model: config.value.model,
+    })
+  } finally {
+    testingChat.value = false
+  }
+}
+
+async function runSysTest() {
+  testingSys.value = true
+  sysTestResult.value = null
+  try {
+    sysTestResult.value = await testEmbeddingApi({
+      baseUrl: sysConfig.value.embeddingBaseUrl,
+      apiKey: sysConfig.value.embeddingApiKey,
+      model: sysConfig.value.embeddingModel,
+    })
+  } finally {
+    testingSys.value = false
+  }
+}
+
+const sysDimensionMismatch = computed(() => {
+  const result = sysTestResult.value
+  return Boolean(
+    result?.success && result.dimension && result.dimension !== EXPECTED_EMBEDDING_DIMENSION,
+  )
+})
+
+// ── 头像 ──
 const emailHash = computed(() => {
   const email = userStore.email || 'user@example.com'
   let hash = 0
@@ -114,505 +237,308 @@ const initials = computed(() => {
   return email.slice(0, 2).toUpperCase()
 })
 
-const statItems = computed(() => [
-  { label: '我的文档', value: `${docCount.value}`, icon: Document },
-  { label: 'AI 配置', value: isConfigComplete.value ? '已配置' : '未配置', icon: Key },
-  { label: '角色', value: userStore.isAdmin ? '管理员' : '用户', icon: DataAnalysis },
-])
-
 onMounted(() => {
-  loadOverview()
+  loadDocCount()
   loadConfig()
 })
 </script>
 
 <template>
   <div class="profile-page">
-    <GradientTitle
-      title="个人中心"
-      subtitle="My Profile"
-      description="管理你的账户、AI 配置和个人信息"
-      :gradient="'var(--gradient-purple)'"
-    />
-
-    <div class="profile-layout">
-      <!-- 左侧信息卡 -->
-      <aside class="profile-sidebar">
-        <!-- 用户身份卡 -->
-        <div class="user-card">
-          <div class="user-avatar" :style="{ background: avatarColor }">
-            {{ initials }}
-          </div>
-          <h3 class="user-email">{{ userStore.email || '未登录' }}</h3>
-          <el-tag :type="isConfigComplete ? 'success' : 'warning'" size="small" round>
-            {{ isConfigComplete ? 'AI 已配置' : 'AI 未配置' }}
+    <!-- 账号头部 -->
+    <header class="account-header">
+      <div class="account-avatar" :style="{ background: avatarColor }">
+        {{ initials }}
+      </div>
+      <div class="account-info">
+        <div class="account-line">
+          <h2 class="account-email">{{ userStore.email || '未登录' }}</h2>
+          <el-tag v-if="userStore.isAdmin" type="warning" size="small" effect="plain" round>
+            管理员
           </el-tag>
         </div>
-
-        <!-- 统计 -->
-        <div class="stats-card">
-          <div
-            v-for="stat in statItems"
-            :key="stat.label"
-            class="stat-item"
-          >
-            <el-icon :size="20" color="var(--md-sys-color-on-surface-variant)">
-              <component :is="stat.icon" />
-            </el-icon>
-            <div class="stat-info">
-              <span class="stat-value-text">{{ stat.value }}</span>
-              <span class="stat-label-text">{{ stat.label }}</span>
-            </div>
-          </div>
+        <div class="account-meta">
+          <span>{{ docCount }} 篇文档</span>
+          <span class="meta-divider">·</span>
+          <span :class="{ 'meta-ok': isConfigComplete }">
+            {{ isConfigComplete ? 'AI 已就绪' : 'AI 未配置' }}
+          </span>
         </div>
+      </div>
+    </header>
 
-        <!-- 功能入口 -->
-        <div class="feature-grid">
-          <div
-            class="feature-item"
-            :class="{ active: activeTab === 'overview' }"
-            @click="activeTab = 'overview'"
-          >
-            <el-icon :size="20"><DataAnalysis /></el-icon>
-            <span>概览</span>
-          </div>
-          <div
-            class="feature-item"
-            :class="{ active: activeTab === 'aiConfig' }"
-            @click="activeTab = 'aiConfig'"
-          >
-            <el-icon :size="20"><Setting /></el-icon>
-            <span>AI 配置</span>
-          </div>
+    <!-- 水平 Tab -->
+    <nav class="tab-bar">
+      <button
+        v-for="tab in tabs"
+        :key="tab.key"
+        type="button"
+        class="tab-item"
+        :class="{ active: activeTab === tab.key }"
+        @click="switchTab(tab.key)"
+      >
+        {{ tab.label }}
+      </button>
+    </nav>
+
+    <!-- AI 配置 -->
+    <section v-if="activeTab === 'aiConfig'" class="tab-panel" v-loading="loading">
+      <p class="panel-lead">
+        填写你自己的对话模型 API（任意 OpenAI 兼容接口，无需支持
+        Embedding）。Key 存储在服务端，仅你本人可见。文档向量化由系统统一提供。
+      </p>
+
+      <el-form label-position="top" class="config-form">
+        <div class="form-row">
+          <el-form-item label="API Base URL" class="grow">
+            <el-input
+              v-model="config.apiBaseUrl"
+              placeholder="https://api.openai.com/v1"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="Model" class="grow">
+            <el-input v-model="config.model" placeholder="gpt-4o-mini" clearable />
+          </el-form-item>
         </div>
-      </aside>
+        <el-form-item label="API Key">
+          <el-input
+            v-model="config.apiKey"
+            type="password"
+            placeholder="sk-..."
+            show-password
+            clearable
+          />
+        </el-form-item>
+      </el-form>
 
-      <!-- 右侧内容区 -->
-      <main class="profile-main">
-        <!-- 概览 Tab -->
-        <div v-if="activeTab === 'overview'" class="tab-content">
-          <div class="content-panel" v-loading="overviewLoading">
-            <h3 class="panel-title">个人概览</h3>
-            <p class="panel-desc">这里是你的账号概况</p>
+      <el-alert
+        v-if="chatTestResult"
+        :type="chatTestResult.success ? 'success' : 'error'"
+        :closable="false"
+        show-icon
+        class="test-result"
+      >
+        <template #title>
+          <span v-if="chatTestResult.success">
+            连接成功，耗时 {{ chatTestResult.latencyMs }} ms，可以保存使用
+          </span>
+          <span v-else>连接失败：{{ chatTestResult.error }}</span>
+        </template>
+      </el-alert>
 
-            <div class="overview-stats">
-              <div class="overview-card">
-                <div class="overview-icon" style="background: rgba(26, 115, 232, 0.1)">
-                  <el-icon :size="28" color="#1a73e8"><Document /></el-icon>
-                </div>
-                <div class="overview-body">
-                  <span class="overview-number">{{ docCount }}</span>
-                  <span class="overview-label">文档数量</span>
-                </div>
-              </div>
+      <footer class="panel-actions">
+        <el-button type="primary" @click="saveConfig" :loading="saving">保存</el-button>
+        <el-button @click="runChatTest" :loading="testingChat">测试连接</el-button>
+        <el-button text type="danger" @click="clearConfig">清除配置</el-button>
+      </footer>
+    </section>
 
-              <div class="overview-card">
-                <div class="overview-icon" style="background: rgba(124, 77, 255, 0.1)">
-                  <el-icon :size="28" color="#7c4dff"><Key /></el-icon>
-                </div>
-                <div class="overview-body">
-                  <span class="overview-number" :class="{ configured: isConfigComplete }">
-                    {{ isConfigComplete ? '已配置' : '未配置' }}
-                  </span>
-                  <span class="overview-label">AI API 状态</span>
-                </div>
-              </div>
+    <!-- 系统向量（仅管理员） -->
+    <section
+      v-if="activeTab === 'systemEmbedding' && userStore.isAdmin"
+      class="tab-panel"
+      v-loading="sysLoading"
+    >
+      <p class="panel-lead">
+        平台级 Embedding API，全部用户的文档入库与检索共用。
+        <strong>配置生效后请勿再修改</strong>——更换模型会使已入库的全部向量失效，需重建索引。
+      </p>
 
-              <div class="overview-card">
-                <div class="overview-icon" style="background: rgba(15, 157, 88, 0.1)">
-                  <el-icon :size="28" color="#0f9d58"><DataAnalysis /></el-icon>
-                </div>
-                <div class="overview-body">
-                  <span class="overview-number">{{ userStore.isAdmin ? '管理员' : '普通用户' }}</span>
-                  <span class="overview-label">账号角色</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="overview-info">
-              <h4>账号信息</h4>
-              <div class="info-row">
-                <span class="info-key">邮箱</span>
-                <span class="info-val">{{ userStore.email || '-' }}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-key">用户 ID</span>
-                <span class="info-val mono">{{ userStore.user?.id || '-' }}</span>
-              </div>
-            </div>
-          </div>
+      <el-form label-position="top" class="config-form">
+        <div class="form-row">
+          <el-form-item label="Base URL" class="grow">
+            <el-input
+              v-model="sysConfig.embeddingBaseUrl"
+              placeholder="https://api.siliconflow.cn/v1"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="Embedding 模型" class="grow">
+            <el-input
+              v-model="sysConfig.embeddingModel"
+              placeholder="Qwen/Qwen3-Embedding-0.6B"
+              clearable
+            />
+          </el-form-item>
         </div>
+        <el-form-item label="API Key">
+          <el-input
+            v-model="sysConfig.embeddingApiKey"
+            type="password"
+            placeholder="服务端使用，普通用户不可见"
+            show-password
+            clearable
+          />
+        </el-form-item>
+      </el-form>
 
-        <!-- AI 配置 Tab -->
-        <div v-if="activeTab === 'aiConfig'" class="tab-content">
-          <div class="content-panel" v-loading="loading">
-            <h3 class="panel-title">AI API 配置</h3>
-            <p class="panel-desc">配置你的大模型 API 以启用 AI 问答、写作助手等功能</p>
+      <el-alert
+        v-if="sysTestResult"
+        :type="sysTestResult.success ? (sysDimensionMismatch ? 'warning' : 'success') : 'error'"
+        :closable="false"
+        show-icon
+        class="test-result"
+      >
+        <template #title>
+          <span v-if="sysTestResult.success && sysDimensionMismatch">
+            接口可用（{{ sysTestResult.latencyMs }} ms），但向量维度为
+            {{ sysTestResult.dimension }}，与数据库 pgvector 列的
+            {{ EXPECTED_EMBEDDING_DIMENSION }} 维不一致——保存前需先执行迁移调整列维度，否则入库会失败
+          </span>
+          <span v-else-if="sysTestResult.success">
+            连接成功，耗时 {{ sysTestResult.latencyMs }} ms，向量维度
+            {{ sysTestResult.dimension }}，与数据库一致
+          </span>
+          <span v-else>连接失败：{{ sysTestResult.error }}</span>
+        </template>
+      </el-alert>
 
-            <el-form label-width="120px" class="ai-form">
-              <el-form-item label="API Base URL">
-                <el-input
-                  v-model="config.apiBaseUrl"
-                  placeholder="例如: https://api.openai.com/v1"
-                  clearable
-                  size="large"
-                />
-              </el-form-item>
-
-              <el-form-item label="API Key">
-                <el-input
-                  v-model="config.apiKey"
-                  type="password"
-                  placeholder="请输入你的 API Key"
-                  show-password
-                  clearable
-                  size="large"
-                />
-              </el-form-item>
-
-              <el-form-item label="Model">
-                <el-input
-                  v-model="config.model"
-                  placeholder="例如: gpt-4o-mini"
-                  clearable
-                  size="large"
-                />
-              </el-form-item>
-
-              <el-form-item>
-                <div class="form-actions">
-                  <el-button type="primary" @click="saveConfig" :loading="saving" size="large">
-                    保存配置
-                  </el-button>
-                  <el-button @click="clearConfig" size="large">
-                    清除配置
-                  </el-button>
-                </div>
-              </el-form-item>
-            </el-form>
-
-            <div class="config-hints">
-              <p><strong>提示：</strong></p>
-              <ul>
-                <li><strong>必须配置</strong>你自己的 API Key 才能使用 AI 问答、写作助手和知识库功能</li>
-                <li>API Key 存储于服务端数据库中，通过 RLS 限制仅你本人可见，并由 Edge Function 代理使用</li>
-                <li>支持任何 OpenAI 兼容接口（如 OpenAI、MiniMax、DeepSeek 等）</li>
-                <li>如未配置，AI 功能将返回错误提示</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
+      <footer class="panel-actions">
+        <el-button type="primary" @click="saveSystemConfig" :loading="sysSaving">
+          保存系统配置
+        </el-button>
+        <el-button @click="runSysTest" :loading="testingSys">测试连接</el-button>
+      </footer>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .profile-page {
-  padding: 4px;
-  max-width: 1280px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 8px 4px;
 }
 
-/* ── 布局 ── */
-.profile-layout {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 32px;
-  align-items: start;
-}
-
-/* ── 左侧 ── */
-.profile-sidebar {
+/* ── 账号头部 ── */
+.account-header {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  position: sticky;
-  top: 80px;
-}
-
-/* 用户身份卡 */
-.user-card {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 32px 24px 24px;
-  background: var(--md-sys-color-surface-container-lowest);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-large);
-  text-align: center;
+  gap: 16px;
+  padding-bottom: 24px;
 }
 
-.user-avatar {
-  width: 72px;
-  height: 72px;
+.account-avatar {
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   color: #fff;
-  letter-spacing: -0.5px;
+  flex-shrink: 0;
 }
 
-.user-email {
-  margin: 0;
-  font-size: var(--md-sys-typescale-title-small);
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-  word-break: break-all;
-}
-
-/* 统计卡 */
-.stats-card {
-  display: flex;
-  flex-direction: column;
-  background: var(--md-sys-color-surface-container-lowest);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-large);
-  overflow: hidden;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.stat-item:last-child {
-  border-bottom: none;
-}
-
-.stat-info {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.stat-value-text {
-  font-size: var(--md-sys-typescale-body-medium);
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-}
-
-.stat-label-text {
-  font-size: var(--md-sys-typescale-label-small);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-/* 功能入口网格 */
-.feature-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.feature-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 8px;
-  background: var(--md-sys-color-surface-container-lowest);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-medium);
-  cursor: pointer;
-  transition: all var(--md-sys-transition-fast) ease;
-  font-size: var(--md-sys-typescale-label-medium);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.feature-item:hover {
-  background: var(--md-sys-color-surface-container);
-  border-color: var(--md-sys-color-outline);
-}
-
-.feature-item.active {
-  background: linear-gradient(135deg, rgba(124, 77, 255, 0.08), rgba(26, 115, 232, 0.08));
-  border-color: var(--module-chat);
-  color: var(--module-chat);
-  font-weight: 600;
-}
-
-/* ── 右侧主内容 ── */
-.profile-main {
+.account-info {
   min-width: 0;
 }
 
-.tab-content {
-  animation: fadeIn var(--md-sys-transition-medium) var(--ease-out-expo);
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.content-panel {
-  background: var(--md-sys-color-surface-container-lowest);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-large);
-  padding: 32px;
-}
-
-.panel-title {
-  margin: 0 0 8px;
-  font-size: var(--md-sys-typescale-title-large);
-  font-weight: 700;
-  color: var(--md-sys-color-on-surface);
-}
-
-.panel-desc {
-  margin: 0 0 24px;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
-}
-
-/* ── 概览卡片 ── */
-.overview-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin-bottom: 32px;
-}
-
-.overview-card {
+.account-line {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px;
-  background: var(--md-sys-color-surface-container);
-  border-radius: var(--md-sys-shape-corner-medium);
+  gap: 10px;
+  min-width: 0;
 }
 
-.overview-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--md-sys-shape-corner-medium);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.overview-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.overview-number {
+.account-email {
+  margin: 0;
   font-size: var(--md-sys-typescale-title-medium);
   font-weight: 700;
   color: var(--md-sys-color-on-surface);
-  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.overview-number.configured {
+.account-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.meta-divider {
+  color: var(--md-sys-color-outline-variant);
+}
+
+.meta-ok {
   color: var(--accent-emerald);
 }
 
-.overview-label {
-  font-size: var(--md-sys-typescale-label-small);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-/* ── 账号信息 ── */
-.overview-info {
-  padding-top: 24px;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.overview-info h4 {
-  margin: 0 0 16px;
-  font-size: var(--md-sys-typescale-title-small);
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-}
-
-.info-row {
+/* ── Tab 栏 ── */
+.tab-bar {
   display: flex;
-  align-items: center;
-  padding: 10px 0;
+  gap: 4px;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  margin-bottom: 24px;
 }
 
-.info-row:last-child {
-  border-bottom: none;
-}
-
-.info-key {
-  width: 100px;
+.tab-item {
+  padding: 10px 14px;
+  margin-bottom: -1px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font: inherit;
   font-size: var(--md-sys-typescale-body-medium);
   color: var(--md-sys-color-on-surface-variant);
-  flex-shrink: 0;
+  cursor: pointer;
+  transition: color var(--md-sys-transition-fast) ease;
 }
 
-.info-val {
-  font-size: var(--md-sys-typescale-body-medium);
+.tab-item:hover {
   color: var(--md-sys-color-on-surface);
-  font-weight: 500;
-  word-break: break-all;
 }
 
-.info-val.mono {
-  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  font-size: var(--md-sys-typescale-label-medium);
+.tab-item.active {
+  color: var(--md-sys-color-on-surface);
+  font-weight: 600;
+  border-bottom-color: var(--module-chat);
 }
 
-/* ── AI 配置表单 ── */
-.ai-form {
-  margin-top: 8px;
-}
-
-.form-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.config-hints {
-  margin-top: 32px;
-  padding: 20px;
-  background: var(--md-sys-color-surface-container);
-  border-radius: var(--md-sys-shape-corner-medium);
-  font-size: var(--md-sys-typescale-body-small);
+/* ── 面板 ── */
+.panel-lead {
+  margin: 0 0 20px;
+  font-size: var(--md-sys-typescale-body-medium);
   color: var(--md-sys-color-on-surface-variant);
   line-height: 1.7;
 }
 
-.config-hints p {
-  margin: 0 0 8px;
+.panel-lead strong {
+  color: var(--md-sys-color-on-surface);
 }
 
-.config-hints ul {
-  margin: 0;
-  padding-left: 20px;
+.form-row {
+  display: flex;
+  gap: 16px;
 }
 
-.config-hints li {
-  margin: 4px 0;
+.form-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.test-result {
+  margin-bottom: 16px;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
 }
 
 /* ── 响应式 ── */
-@media (max-width: 900px) {
-  .profile-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .profile-sidebar {
-    position: static;
-    order: -1;
-  }
-
-  .feature-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .overview-stats {
-    grid-template-columns: 1fr;
+@media (max-width: 640px) {
+  .form-row {
+    flex-direction: column;
+    gap: 0;
   }
 }
 </style>

@@ -8,6 +8,14 @@ export interface UserAiConfig {
   updatedAt?: string
 }
 
+/** 系统级向量 API 配置（单行表，仅管理员可读写） */
+export interface SystemAiConfig {
+  embeddingBaseUrl?: string
+  embeddingApiKey?: string
+  embeddingModel?: string
+  updatedAt?: string
+}
+
 export interface AiChatSourceChunk {
   chunkId: string
   fileId: string | null

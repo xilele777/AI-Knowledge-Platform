@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import 'md-editor-v3/lib/style.css'
 const MdEditor = defineAsyncComponent(() =>
   import('md-editor-v3').then((m) => m.MdEditor),
@@ -370,35 +371,40 @@ void loadDocument()
 <template>
   <div class="editor-page" v-loading="pageLoading">
     <div class="editor-topbar">
-      <el-button text @click="goBack">返回文档列表</el-button>
+      <div class="topbar-left">
+        <el-button text :icon="ArrowLeft" @click="goBack">文档列表</el-button>
+        <el-input
+          v-model="form.title"
+          class="title-input"
+          maxlength="100"
+          placeholder="无标题文档"
+        />
+      </div>
       <div class="topbar-right">
+        <el-tag :type="saveStatusType" size="small" effect="plain">{{ saveStatusText }}</el-tag>
+        <el-tag v-if="isShared" type="success" size="small" effect="plain">共享中</el-tag>
         <el-button type="primary" plain @click="handleOpenJoinDialog">加入知识库</el-button>
         <el-button :type="isShared ? 'info' : 'success'" plain :loading="sharing" @click="handleToggleShare">
           {{ isShared ? '取消共享' : '共享' }}
         </el-button>
-        <el-tag v-if="isShared" type="success" size="small">共享中</el-tag>
-        <el-tag :type="saveStatusType" size="small">{{ saveStatusText }}</el-tag>
         <el-button @click="showAssistant = true">AI 助手</el-button>
         <el-button type="danger" text :loading="deleting" @click="handleDelete">删除</el-button>
       </div>
     </div>
 
+    <el-alert
+      v-if="pageError"
+      :title="pageError"
+      type="error"
+      show-icon
+      :closable="false"
+      class="page-alert"
+    />
 
-
-    <div v-if="!pageError" class="editor-layout">
-      <el-card class="editor-card" shadow="never">
-        <el-form label-position="top">
-          <el-form-item label="文档标题" required>
-            <el-input v-model="form.title" maxlength="100" placeholder="请输入文档标题" />
-          </el-form-item>
-
-          <el-form-item label="正文内容">
-            <div class="md-editor-wrapper">
-              <MdEditor v-model="form.content" language="zh-CN" :preview="false" :auto-detect-code="true" />
-            </div>
-          </el-form-item>
-        </el-form>
-      </el-card>
+    <div v-else class="editor-layout">
+      <div class="md-editor-wrapper">
+        <MdEditor v-model="form.content" language="zh-CN" :preview="false" :auto-detect-code="true" />
+      </div>
     </div>
 
     <!-- AI 助手抽屉 -->
@@ -452,30 +458,59 @@ void loadDocument()
 
 <style scoped>
 .editor-page {
-  padding: 4px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .editor-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 16px;
+  height: 56px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
   flex-shrink: 0;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.title-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 480px;
+}
+
+.title-input :deep(.el-input__wrapper) {
+  box-shadow: none;
+  background: transparent;
+  padding-left: 0;
+}
+
+.title-input :deep(.el-input__inner) {
+  font-size: var(--md-sys-typescale-title-medium);
+  font-weight: 600;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .page-alert {
-  margin-bottom: 12px;
+  margin: 16px 20px;
   flex-shrink: 0;
 }
 
@@ -486,51 +521,10 @@ void loadDocument()
   flex-direction: column;
 }
 
-.editor-card {
-  border: 1px solid var(--md-sys-color-outline-variant);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex: 1;
-  min-height: 0;
-}
-
-/* 打通整条 flex 高度链：el-card-body → el-form → el-form-item → wrapper → editor */
-.editor-card :deep(.el-card__body) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.editor-card :deep(.el-form) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-/* 只有正文内容的 form-item 需要 flex:1，标题的保持固定 */
-.editor-card :deep(.el-form-item:last-child) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.editor-card :deep(.el-form-item:last-child .el-form-item__content) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 .md-editor-wrapper {
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: 8px;
-  overflow: hidden;
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .md-editor-wrapper :deep(.md-editor) {
@@ -549,12 +543,15 @@ void loadDocument()
 
 @media (max-width: 768px) {
   .editor-topbar {
+    height: auto;
     flex-direction: column;
     align-items: stretch;
+    padding: 12px 16px;
   }
 
   .topbar-right {
     justify-content: space-between;
+    flex-wrap: wrap;
   }
 }
 </style>

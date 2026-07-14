@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import { getSharedDocumentById } from '../../api/documents'
 import type { Document } from '../../types/document'
+import PageContainer from '@/components/shared/PageContainer.vue'
+import { useDarkMode } from '@/composables/useDarkMode'
 
 const router = useRouter()
 const route = useRoute()
+const darkMode = useDarkMode()
 const loading = ref(false)
 const doc = ref<Document | null>(null)
 const errorMessage = ref('')
+
+const previewTheme = computed(() => (darkMode.isDark.value ? 'dark' : 'light'))
 
 const loadDocument = async () => {
   const id = route.params.id as string
@@ -61,78 +67,72 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="shared-detail-page" v-loading="loading">
+  <PageContainer width="narrow" v-loading="loading">
     <div v-if="errorMessage" class="error-container">
       <el-alert :title="errorMessage" type="error" show-icon :closable="false" />
-      <el-button type="primary" style="margin-top: 16px" @click="goBack">返回共享广场</el-button>
+      <el-button type="primary" class="error-back-btn" @click="goBack">返回共享广场</el-button>
     </div>
 
-    <div v-else-if="doc" class="doc-container">
-      <div class="doc-header">
-        <div class="header-left">
-          <el-button link @click="goBack">← 返回共享广场</el-button>
-        </div>
-        <div class="header-right">
-          <el-tag type="success">共享文档</el-tag>
-        </div>
+    <article v-else-if="doc" class="doc-article">
+      <div class="doc-toolbar">
+        <el-button text :icon="ArrowLeft" @click="goBack">共享广场</el-button>
+        <el-tag type="success" effect="plain" size="small">共享文档</el-tag>
       </div>
 
-      <div class="doc-title-section">
-        <h1 class="doc-title">{{ doc.title }}</h1>
-        <div class="doc-meta">
-          <span>更新于: {{ formattedTime }}</span>
-        </div>
-      </div>
+      <h1 class="doc-title">{{ doc.title }}</h1>
+      <div class="doc-meta">更新于 {{ formattedTime }}</div>
 
-      <el-card class="doc-content-card" shadow="never">
-        <MdPreview :model-value="doc.content" theme="light" language="zh-CN" />
-      </el-card>
-    </div>
-  </div>
+      <div class="doc-content">
+        <MdPreview :model-value="doc.content" :theme="previewTheme" language="zh-CN" />
+      </div>
+    </article>
+  </PageContainer>
 </template>
 
 <style scoped>
-.shared-detail-page {
-  padding: 4px;
-}
-
 .error-container {
   padding: 24px;
   text-align: center;
 }
 
-.doc-container {
-  max-width: 900px;
-  margin: 0 auto;
+.error-back-btn {
+  margin-top: 16px;
 }
 
-.doc-header {
+.doc-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-}
-
-.doc-title-section {
-  margin-bottom: 16px;
+  margin: 0 0 20px -8px;
 }
 
 .doc-title {
-  margin: 0 0 12px 0;
-  font-size: var(--md-sys-typescale-headline-medium);
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  line-height: 1.3;
   color: var(--md-sys-color-on-surface);
 }
 
 .doc-meta {
+  margin-top: 8px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
   color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
+  font-size: var(--md-sys-typescale-body-small);
 }
 
-.doc-content-card {
-  border: 1px solid var(--md-sys-color-outline-variant);
+.doc-content {
+  padding-top: 8px;
 }
 
 :deep(.md-editor-preview-wrapper) {
-  padding: 20px;
+  padding: 12px 0;
+}
+
+/* 让预览背景融入页面，而不是编辑器内嵌白块 */
+:deep(.md-editor-previewOnly) {
+  background: transparent;
 }
 </style>

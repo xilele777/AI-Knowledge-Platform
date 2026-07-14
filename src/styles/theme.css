@@ -119,6 +119,9 @@
   --page-padding-x: 48px;
   --page-padding-y: 40px;
   --page-max-width: 1280px;
+  --page-width-narrow: 720px;
+  --page-width-default: 1120px;
+  --search-input-width: 320px;
   --page-content-gap: 32px;
   --card-padding: 24px;
   --card-gap: 20px;
@@ -271,4 +274,19 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+/* 面板工具类：全站统一的内容容器（替代默认样式的 el-card） */
+.panel {
+  background: var(--md-sys-color-surface-container-lowest);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-large);
+  padding: 20px;
+}
+
+.panel-title {
+  margin: 0 0 16px;
+  font-size: var(--md-sys-typescale-title-small);
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
 }

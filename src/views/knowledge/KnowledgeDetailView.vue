@@ -14,6 +14,8 @@ import type { KnowledgeBase, KnowledgeDocumentSource, KnowledgeFileListItem } fr
 import KnowledgeFileList from './components/KnowledgeFileList.vue'
 import KnowledgeDocumentSourceList from './components/KnowledgeDocumentSourceList.vue'
 import FileUpload from '../../components/knowledge/FileUpload.vue'
+import PageContainer from '../../components/shared/PageContainer.vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -259,20 +261,28 @@ void loadPageData()
 </script>
 
 <template>
-  <div class="knowledge-detail-page">
-    <div class="page-header">
-      <div class="header-left">
-        <el-button text @click="goList">返回列表</el-button>
-        <div>
-          <h2 class="page-title">知识库详情</h2>
-          <p class="page-subtitle">查看知识库信息、管理文件，并快速进入问答。</p>
-        </div>
-      </div>
+  <PageContainer width="default">
+    <template v-if="knowledgeBase" #actions>
+      <el-button type="danger" text :loading="deleting" @click="handleDeleteKnowledgeBase">删除知识库</el-button>
+      <el-button @click="loadPageData">刷新</el-button>
+      <el-button type="primary" @click="goChat">进入问答页</el-button>
+    </template>
 
-      <div class="page-actions">
-        <el-button type="danger" text :loading="deleting" @click="handleDeleteKnowledgeBase">删除知识库</el-button>
-        <el-button @click="loadPageData">刷新</el-button>
-        <el-button type="primary" @click="goChat">进入问答页</el-button>
+    <div class="detail-head">
+      <el-button text :icon="ArrowLeft" class="back-btn" @click="goList">知识库列表</el-button>
+      <h1 class="detail-title" v-loading="loading">
+        {{ knowledgeBase?.name || '知识库详情' }}
+        <el-tag v-if="knowledgeBase" :type="statusTagType" size="small" effect="plain" class="title-tag">
+          {{ knowledgeBase.status }}
+        </el-tag>
+      </h1>
+      <p v-if="knowledgeBase" class="detail-desc">
+        {{ knowledgeBase.description || '暂无描述' }}
+      </p>
+      <div v-if="knowledgeBase" class="detail-meta">
+        <span>创建于 {{ formatDate(knowledgeBase.createdAt) }}</span>
+        <span class="meta-dot">·</span>
+        <span>更新于 {{ formatDate(knowledgeBase.updatedAt) }}</span>
       </div>
     </div>
 
@@ -285,186 +295,108 @@ void loadPageData()
       class="error-alert"
     />
 
-    <div class="page-content">
-      <el-card shadow="never" class="kb-info-card" v-loading="loading">
-        <template #header>
-          <div class="card-header">知识库信息</div>
-        </template>
+    <div class="detail-grid">
+      <div class="detail-main">
+        <section class="panel">
+          <h3 class="panel-title">文件列表</h3>
+          <KnowledgeFileList :loading="filesLoading" :files="files" @remove="handleDeleteFile" />
+        </section>
 
-        <el-empty v-if="!knowledgeBase" description="暂无知识库信息" />
+        <section class="panel">
+          <h3 class="panel-title">站内文档来源</h3>
+          <KnowledgeDocumentSourceList
+            :loading="documentSourcesLoading"
+            :items="documentSources"
+            @remove="handleRemoveDocument"
+          />
+        </section>
+      </div>
 
-        <div v-else class="info-grid">
-          <div class="info-item">
-            <span class="label">名称</span>
-            <span class="value">{{ knowledgeBase.name }}</span>
-          </div>
-          <div class="info-item">
-            <span class="label">状态</span>
-            <span class="value">
-              <el-tag :type="statusTagType" size="small">{{ knowledgeBase.status }}</el-tag>
-            </span>
-          </div>
-          <div class="info-item full">
-            <span class="label">描述</span>
-            <span class="value">{{ knowledgeBase.description || '暂无描述' }}</span>
-          </div>
-          <div class="info-item">
-            <span class="label">创建时间</span>
-            <span class="value">{{ formatDate(knowledgeBase.createdAt) }}</span>
-          </div>
-          <div class="info-item">
-            <span class="label">更新时间</span>
-            <span class="value">{{ formatDate(knowledgeBase.updatedAt) }}</span>
-          </div>
-        </div>
-      </el-card>
-
-      <el-card shadow="never" class="upload-card">
-        <template #header>
-          <div class="upload-header">上传文件入口</div>
-        </template>
-        <FileUpload :knowledge-base-id="knowledgeBaseId" @uploaded="handleUploaded" />
-      </el-card>
-
-      <el-card shadow="never" class="files-card">
-        <template #header>
-          <div class="files-header">文件列表</div>
-        </template>
-
-        <KnowledgeFileList :loading="filesLoading" :files="files" @remove="handleDeleteFile" />
-      </el-card>
-
-      <el-card shadow="never" class="files-card">
-        <template #header>
-          <div class="files-header">站内文档来源</div>
-        </template>
-
-        <KnowledgeDocumentSourceList
-          :loading="documentSourcesLoading"
-          :items="documentSources"
-          @remove="handleRemoveDocument"
-        />
-      </el-card>
+      <aside class="detail-side">
+        <section class="panel">
+          <h3 class="panel-title">上传文件</h3>
+          <FileUpload :knowledge-base-id="knowledgeBaseId" @uploaded="handleUploaded" />
+        </section>
+      </aside>
     </div>
-  </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.knowledge-detail-page {
-  padding: 4px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+.detail-head {
+  margin-bottom: 24px;
 }
 
-.page-header {
+.back-btn {
+  margin: 0 0 8px -8px;
+}
+
+.detail-title {
+  margin: 0;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+  align-items: center;
+  gap: 10px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--md-sys-color-on-background);
+  line-height: 1.25;
+}
+
+.title-tag {
   flex-shrink: 0;
 }
 
-.header-left {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: var(--md-sys-typescale-headline-small);
-  color: var(--md-sys-color-on-surface);
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
+.detail-desc {
+  margin: 8px 0 0;
   color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-body-medium);
 }
 
-.page-actions {
+.detail-meta {
+  margin-top: 8px;
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.meta-dot {
+  color: var(--md-sys-color-outline-variant);
 }
 
 .error-alert {
-  margin-bottom: 12px;
-  flex-shrink: 0;
+  margin-bottom: 16px;
 }
 
-.page-content {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.kb-info-card,
-.upload-card,
-.files-card {
-  border: 1px solid var(--md-sys-color-outline-variant);
-  flex-shrink: 0;
-}
-
-.upload-card,
-.files-card {
-  margin-top: 0;
-}
-
-.card-header,
-.upload-header,
-.files-header {
-  font-weight: 600;
-}
-
-.info-grid {
+.detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr 320px;
+  gap: 24px;
+  align-items: start;
 }
 
-.info-item {
+.detail-main {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 16px;
+  min-width: 0;
 }
 
-.info-item.full {
-  grid-column: 1 / -1;
+.detail-side {
+  position: sticky;
+  top: 0;
 }
 
-.label {
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-small);
-}
-
-.value {
-  color: var(--md-sys-color-on-surface);
-}
-
-@media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
+@media (max-width: 900px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
   }
 
-  .header-left {
-    flex-direction: column;
-  }
-
-  .page-actions {
-    justify-content: flex-end;
-  }
-
-  .info-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .detail-side {
+    position: static;
+    order: -1;
   }
 }
 </style>
