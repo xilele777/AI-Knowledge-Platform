@@ -39,6 +39,7 @@ const routes: RouteRecordRaw[] = [
         name: 'DocDetail',
         component: () => import('../views/docs/DocEditorView.vue'),
         props: true,
+        meta: { fullBleed: true },
       },
       {
         path: 'shared',
@@ -66,6 +67,7 @@ const routes: RouteRecordRaw[] = [
         path: 'chat',
         name: 'Chat',
         component: () => import('../views/chat/ChatView.vue'),
+        meta: { fullBleed: true },
       },
       {
         path: 'profile',

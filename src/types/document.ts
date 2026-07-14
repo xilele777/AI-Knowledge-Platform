@@ -18,6 +18,7 @@ export interface Document {
 export interface DocumentListItem {
   id: string
   title: string
+  characterCount: number
   status: DocumentStatus
   isShared: boolean
   sharedAt: string | null

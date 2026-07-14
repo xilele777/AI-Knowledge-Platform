@@ -1,36 +1,29 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Search, Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { getMyDocuments } from '@/api/documents'
-import { getAdminDashboardStats } from '@/api/admin'
-import type { AdminDashboardStats } from '@/api/admin'
 import type { DocumentListItem } from '@/types/document'
 import { useAsyncState } from '@/composables/useAsyncState'
 import { useNumberTween } from '@/composables/useNumberTween'
 import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
-import GradientTitle from '@/components/shared/GradientTitle.vue'
+import PageContainer from '@/components/shared/PageContainer.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import SvgIcon from '@/components/shared/SvgIcon.vue'
+import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
 
 const router = useRouter()
-const SearchIcon = Search
 const RefreshIcon = Refresh
-const searchQuery = ref('')
 
 // ─── 数据获取 ───
-const statsState = useAsyncState<AdminDashboardStats>({ initialData: null })
 const docsState = useAsyncState<DocumentListItem[]>({ initialData: [] })
 
 const loadAll = async () => {
-  await Promise.all([
-    statsState.execute(() =>
-      getAdminDashboardStats().then((r) => (r.success ? r.data! : Promise.reject(new Error(r.error!)))),
+  await docsState.execute(() =>
+    getMyDocuments({ limit: 1000 }).then((r) =>
+      r.success ? (r.data ?? []) : Promise.reject(new Error(r.error!)),
     ),
-    docsState.execute(() =>
-      getMyDocuments().then((r) => (r.success ? (r.data ?? []) : Promise.reject(new Error(r.error!)))),
-    ),
-  ])
+  )
 }
 
 void loadAll()
@@ -38,50 +31,92 @@ void loadAll()
 // ─── 统计卡片数据 ───
 const statCards = computed(() => [
   {
-    label: '文档',
+    label: '总字数',
     icon: 'document' as const,
-    value: statsState.data.value?.documentCount ?? 0,
+    value: totalCharacters.value,
     color: 'var(--md-sys-color-primary)',
     bgClass: 'stat-card-primary',
   },
   {
-    label: '知识库',
-    icon: 'knowledge' as const,
-    value: statsState.data.value?.fileCount ?? 0,
+    label: '文档总数',
+    icon: 'dashboard' as const,
+    value: documents.value.length,
     color: 'var(--accent-emerald)',
     bgClass: 'stat-card-success',
   },
   {
-    label: '问答',
-    icon: 'chat' as const,
-    value: statsState.data.value?.chatCount ?? 0,
+    label: '草稿',
+    icon: 'plus' as const,
+    value: draftCount.value,
     color: 'var(--accent-violet)',
     bgClass: 'stat-card-violet',
   },
   {
-    label: '用户',
-    icon: 'user' as const,
-    value: statsState.data.value?.userCount ?? 0,
+    label: '已发布',
+    icon: 'share' as const,
+    value: publishedCount.value,
     color: 'var(--accent-amber)',
     bgClass: 'stat-card-amber',
   },
 ])
 
+// ─── 最近文档 ───
+const documents = computed(() => docsState.data.value ?? [])
+const recentDocs = computed(() => documents.value.slice(0, 6))
+const totalCharacters = computed(() =>
+  documents.value.reduce((total, doc) => total + doc.characterCount, 0),
+)
+const draftCount = computed(() => documents.value.filter((doc) => doc.status === 'draft').length)
+const publishedCount = computed(() =>
+  documents.value.filter((doc) => doc.status === 'published').length,
+)
+const averageCharacters = computed(() =>
+  documents.value.length ? Math.round(totalCharacters.value / documents.value.length) : 0,
+)
+
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+}
+
+const todayEditedCount = computed(() => {
+  const today = dateKey(new Date())
+  return documents.value.filter((doc) => dateKey(new Date(doc.updatedAt)) === today).length
+})
+
+const activityDays = computed(() => {
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date()
+    date.setHours(0, 0, 0, 0)
+    date.setDate(date.getDate() - (6 - index))
+    const key = dateKey(date)
+    const count = documents.value.filter((doc) => dateKey(new Date(doc.updatedAt)) === key).length
+
+    return {
+      key,
+      label: date.toLocaleDateString('zh-CN', { weekday: 'short' }).replace('周', ''),
+      count,
+    }
+  })
+  const max = Math.max(...days.map((day) => day.count), 1)
+  return days.map((day) => ({ ...day, height: Math.max((day.count / max) * 100, day.count ? 12 : 3) }))
+})
+
+const activeDaysCount = computed(() => activityDays.value.filter((day) => day.count > 0).length)
+
 // ─── 数字滚动动画 ───
-const tweenTargets = computed(() => statCards.value.map((c) => c.value))
-const tweens = tweenTargets.value.map((_, i) =>
+const tweenTargets = computed(() => statCards.value.map((card) => card.value))
+const tweens = tweenTargets.value.map((_, index) =>
   useNumberTween(
-    computed(() => tweenTargets.value[i] ?? 0),
+    computed(() => tweenTargets.value[index] ?? 0),
     1000,
   ),
 )
 
-// ─── 最近文档 ───
-const recentDocs = computed(() => docsState.data.value?.slice(0, 5) ?? [])
+const isLoading = computed(() => docsState.isLoading.value)
 
-const isLoading = computed(
-  () => statsState.isLoading.value || docsState.isLoading.value,
-)
+function formatNumber(value: number): string {
+  return value.toLocaleString('zh-CN')
+}
 
 // ─── 格式化 ───
 function formatTime(dateStr: string): string {
@@ -106,44 +141,26 @@ function statusText(status: string): string {
   return '草稿'
 }
 
-// ─── 快速入口 ───
-const quickActions = [
-  { label: '新建文档', icon: 'plus' as const, path: '/docs', action: 'create' },
-  { label: '知识库', icon: 'knowledge' as const, path: '/knowledge' },
-  { label: '开始问答', icon: 'chat' as const, path: '/chat' },
-  { label: '共享广场', icon: 'share' as const, path: '/shared' },
-]
+function openDocument(id: string) {
+  void router.push({ name: 'DocDetail', params: { id } })
+}
 
 // ─── 键盘快捷键 ───
 useKeyboardShortcut({
-  'ctrl+n': () => router.push('/docs'),
+  'ctrl+n': () => router.push({ path: '/docs', query: { create: '1' } }),
 })
 </script>
 
 <template>
-  <div class="dashboard">
-    <!-- 头部 -->
-    <div class="dashboard-header">
-      <GradientTitle
-        title="工作台"
-        subtitle="Dashboard"
-        description="AI 知识库平台指挥中心"
-        :gradient="'var(--gradient-blue)'"
-      />
-      <div class="header-search">
-        <el-input
-          v-model="searchQuery"
-          placeholder="搜索文档、知识库或问答内容..."
-          size="large"
-          clearable
-          :prefix-icon="SearchIcon"
-          class="search-input"
-        />
-      </div>
-      <div class="header-actions">
-        <el-button @click="loadAll" :loading="isLoading" :icon="RefreshIcon" round>刷新</el-button>
-      </div>
-    </div>
+  <PageContainer
+    width="default"
+    title="工作台"
+    title-class="gradient-text"
+    description="AI 知识库平台指挥中心"
+  >
+    <template #actions>
+      <el-button @click="loadAll" :loading="isLoading" :icon="RefreshIcon">刷新</el-button>
+    </template>
 
     <!-- 骨架屏 -->
     <template v-if="isLoading">
@@ -163,7 +180,7 @@ useKeyboardShortcut({
         </div>
         <div class="stat-body">
           <div class="stat-value" :style="{ color: card.color }">
-            {{ tweens[i]?.displayValue.value ?? card.value }}
+            {{ formatNumber(tweens[i]?.displayValue.value ?? card.value) }}
           </div>
           <div class="stat-label">{{ card.label }}</div>
         </div>
@@ -181,17 +198,23 @@ useKeyboardShortcut({
           </el-button>
         </div>
 
-        <div v-if="recentDocs.length === 0" class="empty-hint">
-          <SvgIcon name="empty-doc" :size="48" color="var(--md-sys-color-outline)" />
-          <p>还没有文档，开始创作吧</p>
-        </div>
+        <EmptyStateActionable
+          v-if="recentDocs.length === 0"
+          icon="empty-doc"
+          title="还没有文档"
+          description="开始创作你的第一篇文档"
+          action-text="新建文档"
+          @action="router.push({ path: '/docs', query: { create: '1' } })"
+        />
 
         <div v-else class="recent-list">
-          <div
+          <button
             v-for="doc in recentDocs"
             :key="doc.id"
+            type="button"
             class="recent-item"
-            @click="router.push(`/docs/${doc.id}`)"
+            :aria-label="`打开文档：${doc.title}`"
+            @click="openDocument(doc.id)"
           >
             <div class="recent-item-icon">
               <SvgIcon name="document" :size="18" />
@@ -199,83 +222,52 @@ useKeyboardShortcut({
             <div class="recent-item-body">
               <span class="recent-item-title">{{ doc.title }}</span>
               <span class="recent-item-meta">
+                <span>{{ formatNumber(doc.characterCount) }} 字</span>
                 {{ formatTime(doc.updatedAt) }}
                 <el-tag size="small" :type="doc.status === 'published' ? 'success' : 'info'">
                   {{ statusText(doc.status) }}
                 </el-tag>
               </span>
             </div>
-          </div>
+          </button>
         </div>
       </section>
 
-      <!-- 快速入口 -->
-      <section class="section">
-        <h3 class="section-title">快速入口</h3>
-        <div class="quick-actions">
-          <el-button
-            v-for="action in quickActions"
-            :key="action.label"
-            class="quick-action-btn"
-            @click="router.push(action.path)"
-          >
-            <SvgIcon :name="action.icon" :size="18" />
-            {{ action.label }}
-          </el-button>
+      <section class="section writing-overview">
+        <div class="section-header">
+          <h3 class="section-title">近 7 天创作</h3>
+          <span class="activity-summary">活跃 {{ activeDaysCount }} 天</span>
         </div>
+
+        <div class="activity-chart" aria-label="近 7 天更新文档数量">
+          <div v-for="day in activityDays" :key="day.key" class="activity-day">
+            <span class="activity-count">{{ day.count || '' }}</span>
+            <div class="activity-track">
+              <div class="activity-bar" :style="{ height: `${day.height}%` }" />
+            </div>
+            <span class="activity-label">{{ day.label }}</span>
+          </div>
+        </div>
+
+        <div class="writing-metrics">
+          <div><span>今日编辑</span><strong>{{ todayEditedCount }} 篇</strong></div>
+          <div><span>平均篇幅</span><strong>{{ formatNumber(averageCharacters) }} 字</strong></div>
+        </div>
+
+        <el-button
+          type="primary"
+          class="create-document-btn"
+          @click="router.push({ path: '/docs', query: { create: '1' } })"
+        >
+          <SvgIcon name="plus" :size="18" />
+          新建文档
+        </el-button>
       </section>
     </div>
-  </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.dashboard {
-  padding: 4px;
-}
-
-/* ── 头部 ── */
-.dashboard-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 40px;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.dashboard-header :deep(.gradient-title-wrapper) {
-  margin-bottom: 0;
-}
-
-.header-search {
-  flex: 1;
-  max-width: 480px;
-  min-width: 240px;
-}
-
-.search-input :deep(.el-input__wrapper) {
-  border-radius: 9999px;
-  box-shadow: var(--shadow-md);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface-container-lowest);
-  transition: box-shadow var(--md-sys-transition-medium) var(--ease-out-expo),
-              border-color var(--md-sys-transition-medium) var(--ease-out-expo);
-}
-
-.search-input :deep(.el-input__wrapper:hover) {
-  border-color: var(--md-sys-color-outline);
-  box-shadow: var(--shadow-lg);
-}
-
-.search-input :deep(.el-input__wrapper.is-focus) {
-  border-color: var(--md-sys-color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12), var(--shadow-lg);
-}
-
-.header-actions {
-  flex-shrink: 0;
-}
-
 /* ── 统计卡片网格 ── */
 .stats-grid {
   display: grid;
@@ -350,7 +342,7 @@ useKeyboardShortcut({
 /* ── 内容区 ── */
 .dashboard-content {
   display: grid;
-  grid-template-columns: 1fr 280px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 32px;
   align-items: start;
 }
@@ -391,8 +383,16 @@ useKeyboardShortcut({
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 14px 20px;
+  margin: 0;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
+  appearance: none;
+  color: inherit;
+  background: transparent;
+  border: 0;
   transition: background-color var(--md-sys-transition-fast) ease;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
@@ -403,6 +403,13 @@ useKeyboardShortcut({
 
 .recent-item:hover {
   background: var(--md-sys-color-surface-container);
+}
+
+.recent-item:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: -2px;
 }
 
 .recent-item-icon {
@@ -437,51 +444,88 @@ useKeyboardShortcut({
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.empty-hint {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 40px 24px;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
-  border: 1px dashed var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-large);
-}
-
-.empty-hint p {
-  margin: 0;
-  color: var(--md-sys-color-outline);
-}
-
-/* ── 快速入口 ── */
-.quick-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.quick-action-btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: flex-start;
-  width: 100%;
-  height: 44px;
-  padding: 0 16px;
-  font-weight: 500;
-  font-size: var(--md-sys-typescale-body-medium);
+/* ── 写作概览 ── */
+.writing-overview {
+  padding: 20px;
   border-radius: var(--md-sys-shape-corner-medium);
   border: 1px solid var(--md-sys-color-outline-variant);
   background: var(--md-sys-color-surface-container-lowest);
-  color: var(--md-sys-color-on-surface);
-  transition: all var(--md-sys-transition-fast) ease;
 }
 
-.quick-action-btn:hover {
+.activity-summary {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
+}
+
+.activity-chart {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  align-items: end;
+  gap: 8px;
+  height: 150px;
+  padding: 8px 0 16px;
+}
+
+.activity-day {
+  display: grid;
+  grid-template-rows: 18px 92px 18px;
+  align-items: end;
+  justify-items: center;
+  gap: 4px;
+}
+
+.activity-count,
+.activity-label {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small);
+}
+
+.activity-track {
+  display: flex;
+  align-items: flex-end;
+  width: 14px;
+  height: 92px;
+  border-radius: 999px;
   background: var(--md-sys-color-surface-container);
-  border-color: var(--md-sys-color-outline);
-  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.activity-bar {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--md-sys-color-primary), var(--accent-violet));
+  transition: height var(--md-sys-transition-medium) var(--ease-out-expo);
+}
+
+.writing-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.writing-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--md-sys-shape-corner-small);
+  background: var(--md-sys-color-surface-container);
+}
+
+.writing-metrics span {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small);
+}
+
+.writing-metrics strong {
+  color: var(--md-sys-color-on-surface);
+  font-size: var(--md-sys-typescale-title-medium);
+}
+
+.create-document-btn {
+  width: 100%;
 }
 
 /* ── 响应式 ── */

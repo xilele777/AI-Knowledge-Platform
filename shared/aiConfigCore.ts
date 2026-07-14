@@ -10,11 +10,3 @@ export function normalizeBaseUrl(value: string | null | undefined): string {
 export function resolveDefaultModel(model: string | null | undefined): string {
   return (model || DEFAULT_MODEL).trim()
 }
-
-export function resolveEmbeddingModel(model: string): string {
-  const normalized = model.trim()
-  if (normalized.toLowerCase().includes('embedding')) {
-    return normalized
-  }
-  return DEFAULT_EMBEDDING_MODEL
-}

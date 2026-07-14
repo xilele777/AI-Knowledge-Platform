@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import PageContainer from '@/components/shared/PageContainer.vue'
 import { getAdminKnowledgeFiles, type AdminKnowledgeFileItem } from '../../api/admin'
 
 const loading = ref(false)
@@ -49,13 +50,15 @@ void loadFiles()
 </script>
 
 <template>
-  <div class="admin-page">
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">文件管理</h2>
-      </div>
+  <PageContainer
+    width="full"
+    class="admin-page"
+    title="文件管理"
+    description="查看全站知识库上传的文件"
+  >
+    <template #actions>
       <el-button :loading="loading" @click="loadFiles">刷新</el-button>
-    </div>
+    </template>
 
     <el-alert
       v-if="errorMessage"
@@ -66,11 +69,11 @@ void loadFiles()
       class="error-alert"
     />
 
-    <el-card shadow="never">
+    <div class="panel">
       <div v-loading="loading">
         <el-empty v-if="!loading && rows.length === 0" description="暂无文件数据" />
 
-        <el-table v-else :data="rows" border stripe>
+        <el-table v-else :data="rows">
           <el-table-column prop="fileName" label="文件名" min-width="200" />
           <el-table-column label="状态" min-width="100">
             <template #default="scope">
@@ -94,43 +97,12 @@ void loadFiles()
           </el-table-column>
         </el-table>
       </div>
-    </el-card>
-  </div>
+    </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.admin-page {
-  padding: 4px;
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: var(--md-sys-typescale-headline-small);
-  color: var(--md-sys-color-on-surface);
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
-}
-
 .error-alert {
-  margin-bottom: 12px;
-}
-
-@media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
+  margin-bottom: 16px;
 }
 </style>

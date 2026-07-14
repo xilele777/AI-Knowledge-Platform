@@ -4,6 +4,8 @@ import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import PageContainer from '@/components/shared/PageContainer.vue'
+import StatCard from '@/components/shared/StatCard.vue'
 import { getAdminAnalyticsOverview, type AdminAnalyticsOverview } from '../../api/admin'
 
 const VChart = defineAsyncComponent(() => import('vue-echarts'))
@@ -191,13 +193,15 @@ void loadData()
 </script>
 
 <template>
-  <div class="analytics-page">
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">统计分析</h2>
-      </div>
+  <PageContainer
+    width="full"
+    class="admin-page"
+    title="统计分析"
+    description="近 7 天平台使用趋势与关键指标"
+  >
+    <template #actions>
       <el-button :loading="loading" @click="loadData">刷新</el-button>
-    </div>
+    </template>
 
     <el-alert
       v-if="errorMessage"
@@ -209,179 +213,95 @@ void loadData()
     />
 
     <div v-loading="loading" class="analytics-content">
-      <el-row :gutter="16">
-        <el-col v-for="item in metricCards" :key="item.label" :xs="24" :sm="12" :lg="6">
-          <el-card class="metric-card">
-            <div class="metric-label">{{ item.label }}</div>
-            <div class="metric-value" :style="{ color: item.color }">{{ item.value }}</div>
-          </el-card>
-        </el-col>
-      </el-row>
+      <div class="stats-grid">
+        <StatCard
+          v-for="item in metricCards"
+          :key="item.label"
+          :label="item.label"
+          :value="item.value"
+          :color="item.color"
+        />
+      </div>
 
-      <el-row :gutter="16" class="chart-row">
-        <el-col :xs="24" :lg="12">
-          <el-card class="chart-card">
-            <template #header>
-              <div class="card-title">最近 7 天登录趋势</div>
-            </template>
-            <VChart class="trend-chart" :option="loginTrendOption" autoresize />
-          </el-card>
-        </el-col>
+      <div class="chart-grid">
+        <div class="panel">
+          <h3 class="panel-title">最近 7 天登录趋势</h3>
+          <VChart class="trend-chart" :option="loginTrendOption" autoresize />
+        </div>
 
-        <el-col :xs="24" :lg="12">
-          <el-card class="chart-card">
-            <template #header>
-              <div class="card-title">最近 7 天 AI 调用趋势</div>
-            </template>
-            <VChart class="trend-chart" :option="aiTrendOption" autoresize />
-          </el-card>
-        </el-col>
-      </el-row>
+        <div class="panel">
+          <h3 class="panel-title">最近 7 天 AI 调用趋势</h3>
+          <VChart class="trend-chart" :option="aiTrendOption" autoresize />
+        </div>
+      </div>
 
-      <el-row :gutter="16" class="extra-row">
-        <el-col :xs="24" :lg="16">
-          <el-card class="extra-card">
-            <template #header>
-              <div class="card-title">补充指标（MVP+）</div>
-            </template>
-            <div class="extra-grid">
-              <div v-for="item in extraCards" :key="item.label" class="extra-item">
-                <div class="extra-label">{{ item.label }}</div>
-                <div class="extra-value" :style="{ color: item.color }">{{ item.value }}</div>
-              </div>
+      <div class="bottom-grid">
+        <div class="extra-grid">
+          <StatCard
+            v-for="item in extraCards"
+            :key="item.label"
+            :label="item.label"
+            :value="item.value"
+            :color="item.color"
+          />
+        </div>
+
+        <div class="panel">
+          <h3 class="panel-title">近 7 天热点事件</h3>
+
+          <el-empty v-if="topEvents.length === 0" description="暂无事件数据" :image-size="64" />
+
+          <div v-else class="event-list">
+            <div v-for="event in topEvents" :key="event.eventName" class="event-item">
+              <span class="event-name">{{ event.eventName }}</span>
+              <span class="event-count" style="color: var(--google-purple)">{{ event.count }}</span>
             </div>
-          </el-card>
-        </el-col>
-
-        <el-col :xs="24" :lg="8">
-          <el-card class="extra-card">
-            <template #header>
-              <div class="card-title">近 7 天热点事件</div>
-            </template>
-
-            <el-empty v-if="topEvents.length === 0" description="暂无事件数据" :image-size="64" />
-
-            <div v-else class="event-list">
-              <div v-for="event in topEvents" :key="event.eventName" class="event-item">
-                <span class="event-name">{{ event.eventName }}</span>
-                <span class="event-count" style="color: var(--google-purple)">{{ event.count }}</span>
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
+  </PageContainer>
 </template>
 
 <style scoped>
-.analytics-page {
-  padding: 4px;
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: var(--md-sys-typescale-headline-small);
-  color: var(--md-sys-color-on-background);
-  font-weight: 400;
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
-}
-
 .error-alert {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .analytics-content {
   min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.metric-card {
-  border: none;
-  background-color: var(--md-sys-color-surface-container-low);
-  transition: all var(--md-sys-transition-medium) var(--md-sys-motion-easing-standard);
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
 }
 
-.metric-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--md-sys-elevation-level-2);
-}
-
-.metric-label {
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-label-large);
-  font-weight: 500;
-}
-
-.metric-value {
-  margin-top: 12px;
-  font-size: var(--md-sys-typescale-display-small);
-  line-height: 1;
-  font-weight: 600;
-  transition: color var(--md-sys-transition-medium);
-}
-
-.metric-desc {
-  margin-top: 8px;
-  font-size: var(--md-sys-typescale-label-medium);
-  color: var(--md-sys-color-outline);
-}
-
-.chart-row,
-.extra-row {
-  margin-top: 2px;
-}
-
-.chart-card,
-.extra-card {
-  border: none;
-  background-color: var(--md-sys-color-surface-container-lowest);
-}
-
-.card-title {
-  font-weight: 500;
-  color: var(--md-sys-color-on-surface);
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .trend-chart {
   height: 300px;
 }
 
+.bottom-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
 .extra-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.extra-item {
-  border-radius: var(--md-sys-shape-corner-medium);
-  padding: 12px;
-  background: var(--md-sys-color-surface-container-low);
-}
-
-.extra-label {
-  font-size: var(--md-sys-typescale-label-medium);
-  color: var(--md-sys-color-on-surface-variant);
-  font-weight: 500;
-}
-
-.extra-value {
-  margin-top: 8px;
-  font-size: 26px;
-  font-weight: 600;
-  transition: color var(--md-sys-transition-medium);
+  gap: 16px;
 }
 
 .event-list {
@@ -410,20 +330,19 @@ void loadData()
   font-weight: 600;
 }
 
-:deep(.el-col) {
-  margin-bottom: 16px;
-}
-
 @media (max-width: 1200px) {
+  .bottom-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .extra-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
+  .chart-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .extra-grid {

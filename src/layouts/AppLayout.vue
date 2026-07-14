@@ -182,7 +182,7 @@ function handleMenuCommand(command: string) {
         </div>
       </el-header>
 
-      <el-main class="layout-main">
+      <el-main class="layout-main" :class="{ 'layout-main--fill': route.meta.fullBleed }">
         <router-view v-slot="{ Component }">
           <Transition name="page-fade" mode="out-in">
             <component :is="Component" />
@@ -415,6 +415,14 @@ function handleMenuCommand(command: string) {
   flex: 1;
   min-height: 0;
   background-color: var(--md-sys-color-background);
+}
+
+/* fullBleed 页面（chat / 文档编辑器）：页面自管高度与滚动 */
+.layout-main--fill {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------- 页面过渡动画 ---------- */

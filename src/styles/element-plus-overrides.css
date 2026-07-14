@@ -281,16 +281,20 @@
   border: none;
 }
 
-.el-table th {
-  background-color: var(--md-sys-color-surface-container-low);
-  color: var(--md-sys-color-on-surface);
-  font-weight: 500;
+.el-table th.el-table__cell {
+  background-color: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
+  font-weight: 600;
   border: none;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  padding: 10px 0;
 }
 
-.el-table td {
+.el-table td.el-table__cell {
   border: none;
   border-bottom: 1px solid var(--md-sys-color-surface-container);
+  padding: 12px 0;
 }
 
 .el-table tr {

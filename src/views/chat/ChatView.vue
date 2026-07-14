@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Delete } from '@element-plus/icons-vue'
 import { useAiConfigStore } from '@/stores/aiConfig'
 import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
-import GradientTitle from '@/components/shared/GradientTitle.vue'
 import ChatInput from './components/ChatInput.vue'
 import ChatMessageList from './components/ChatMessageList.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
@@ -12,6 +11,7 @@ import { useChatSession } from './composables/useChatSession'
 import { useChatMessages } from './composables/useChatMessages'
 
 const route = useRoute()
+const router = useRouter()
 const aiConfigStore = useAiConfigStore()
 
 const session = useChatSession()
@@ -101,6 +101,12 @@ async function bootstrap() {
     }
 
     applyQaConfigFromSelectedKnowledgeBase()
+
+    if (route.query.new === '1') {
+      startNewChat()
+      void router.replace({ path: route.path, query: { ...route.query, new: undefined } })
+      return
+    }
 
     if (activeChatId.value) {
       await loadMessages(activeChatId.value)
@@ -195,14 +201,8 @@ useKeyboardShortcut({
       <main class="main-content">
         <header class="chat-header">
           <div class="header-left">
-            <GradientTitle
-              title="智能对话"
-              subtitle="AI Chat"
-              :gradient="'var(--gradient-purple)'"
-            />
-            <p class="header-subtitle">
-              {{ selectedKnowledgeBaseName }} · {{ qaSummaryText }}
-            </p>
+            <span class="header-kb">{{ selectedKnowledgeBaseName || '未选择知识库' }}</span>
+            <span class="header-summary">{{ qaSummaryText }}</span>
           </div>
           <el-button size="small" @click="showQaConfigDrawer = true" class="settings-btn">
             设置
@@ -285,7 +285,8 @@ useKeyboardShortcut({
 .chat-app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   background: var(--md-sys-color-surface-container);
 }
 
@@ -305,8 +306,8 @@ useKeyboardShortcut({
 }
 
 .sidebar {
-  width: 280px;
-  background: var(--md-sys-color-surface-container-lowest);
+  width: 260px;
+  background: var(--md-sys-color-surface-container-low);
   border-right: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   flex-direction: column;
@@ -432,37 +433,35 @@ useKeyboardShortcut({
 }
 
 .chat-header {
-  padding: 16px 24px;
+  height: 48px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: var(--md-sys-color-surface-container-low);
+  background: var(--md-sys-color-surface-container-lowest);
+  flex-shrink: 0;
 }
 
 .header-left {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.header-left :deep(.gradient-title-wrapper) {
-  margin-bottom: 4px;
+.header-kb {
+  font-size: var(--md-sys-typescale-body-medium);
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
 }
 
-.header-left :deep(.gradient-heading) {
-  font-size: var(--md-sys-typescale-title-medium);
-}
-
-.header-left :deep(.gradient-subtitle) {
+.header-summary {
   font-size: var(--md-sys-typescale-label-small);
-  margin-bottom: 2px;
-}
-
-.header-subtitle {
-  font-size: var(--md-sys-typescale-body-small);
   color: var(--md-sys-color-on-surface-variant);
-  margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
