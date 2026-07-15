@@ -138,13 +138,15 @@ using (
   or lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'is_admin', '')) in ('true', '1', 't', 'yes', 'y')
 );
 
+drop function if exists public.admin_get_profiles(integer);
 create or replace function public.admin_get_profiles(p_limit integer default 200)
 returns table (
   id uuid,
   email text,
   full_name text,
   role text,
-  created_at timestamptz
+  created_at timestamptz,
+  is_banned boolean
 )
 language plpgsql
 security definer
@@ -181,16 +183,17 @@ begin
 
   return query
   select
-    u.id,
-    u.email,
+    u.id::uuid,
+    u.email::text,
     coalesce(
       p.full_name,
       u.raw_user_meta_data ->> 'full_name',
       u.raw_user_meta_data ->> 'name',
       u.raw_user_meta_data ->> 'nickname'
-    ) as full_name,
-    coalesce(nullif(p.role, ''), nullif(u.raw_app_meta_data ->> 'role', ''), 'user') as role,
-    coalesce(p.created_at, u.created_at) as created_at
+    )::text as full_name,
+    coalesce(nullif(p.role, ''), nullif(u.raw_app_meta_data ->> 'role', ''), 'user')::text as role,
+    coalesce(p.created_at, u.created_at)::timestamptz as created_at,
+    (u.banned_until is not null and u.banned_until > now())::boolean as is_banned
   from auth.users u
   left join public.profiles p on p.id = u.id
   order by coalesce(p.created_at, u.created_at) desc nulls last

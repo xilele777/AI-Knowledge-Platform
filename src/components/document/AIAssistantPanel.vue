@@ -116,10 +116,6 @@ async function handleCopy() {
 
 <template>
   <el-card class="assistant-card" shadow="never">
-    <template #header>
-      <span class="assistant-header">AI 写作助手</span>
-    </template>
-
     <!-- 操作区 -->
     <div class="form-area">
       <el-radio-group v-model="form.action" size="small" class="action-group">
@@ -216,11 +212,6 @@ async function handleCopy() {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.assistant-header {
-  font-weight: 600;
-  font-size: var(--md-sys-typescale-title-small);
 }
 
 /* ===== 操作区 ===== */

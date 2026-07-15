@@ -1,4 +1,6 @@
 import { getCurrentUser } from './auth'
+import pinia from '../stores'
+import { useUserStore } from '../stores/user'
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
 import type {
   ApiResult,
@@ -84,6 +86,13 @@ function isMissingErrorMessageColumnError(message: string): boolean {
 }
 
 async function requireUserId(): Promise<string> {
+  const userStore = useUserStore(pinia)
+  const storeUserId = userStore.user?.id
+
+  if (storeUserId) {
+    return storeUserId
+  }
+
   const user = await getCurrentUser()
 
   if (!user) {
@@ -247,7 +256,7 @@ export async function getMyChats(limit = 100): Promise<ApiResult<ChatListItem[]>
 
     const { data, error } = await supabase
       .from(CHAT_TABLE)
-      .select('*')
+      .select('id, knowledge_base_id, title, created_at, updated_at')
       .eq('owner_id', userId)
       .order('updated_at', { ascending: false })
       .limit(limit)

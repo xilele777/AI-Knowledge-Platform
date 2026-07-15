@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MoreFilled } from '@element-plus/icons-vue'
 import type { DocumentListItem } from '../../../types/document'
 import { updateDocument } from '../../../api/documents'
 
@@ -14,30 +13,6 @@ const emit = defineEmits<{
   remove: [id: string]
   update: []
 }>()
-
-const statusType = computed(() => {
-  if (props.item.status === 'published') {
-    return 'success'
-  }
-
-  if (props.item.status === 'archived') {
-    return 'info'
-  }
-
-  return 'warning'
-})
-
-const statusText = computed(() => {
-  if (props.item.status === 'published') {
-    return '已发布'
-  }
-
-  if (props.item.status === 'archived') {
-    return '已归档'
-  }
-
-  return '草稿'
-})
 
 const formattedTime = computed(() => {
   const date = new Date(props.item.updatedAt)
@@ -55,10 +30,6 @@ const handleOpen = () => {
   emit('open', props.item.id)
 }
 
-const handleEdit = () => {
-  emit('open', props.item.id)
-}
-
 const handleRemove = () => {
   emit('remove', props.item.id)
 }
@@ -73,7 +44,7 @@ const handleToggleShare = async () => {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning',
-      }
+      },
     )
 
     const result = await updateDocument(props.item.id, {
@@ -98,33 +69,21 @@ const handleToggleShare = async () => {
 <template>
   <el-card class="doc-card" shadow="hover" @click="handleOpen">
     <div class="doc-header">
-      <h3 class="doc-title" :title="item.title">{{ item.title }}</h3>
-      <div class="doc-tags">
-        <el-tag v-if="item.isShared" size="small" type="success">共享中</el-tag>
-        <el-tag size="small" :type="statusType">{{ statusText }}</el-tag>
+      <div class="doc-title-wrap">
+        <h3 class="doc-title" :title="item.title">{{ item.title }}</h3>
+        <div class="doc-tags">
+          <el-tag v-if="item.isShared" size="small" type="success">共享中</el-tag>
+        </div>
+      </div>
+      <div class="doc-actions" @click.stop>
+        <el-button size="small" type="primary" plain @click.stop="handleToggleShare">
+          {{ item.isShared ? '取消共享' : '共享' }}
+        </el-button>
+        <el-button size="small" type="danger" plain @click.stop="handleRemove">删除</el-button>
       </div>
     </div>
 
     <div class="doc-meta">最近更新: {{ formattedTime }}</div>
-
-    <div class="doc-actions" @click.stop>
-      <el-dropdown trigger="click" placement="bottom-end">
-        <el-button class="more-btn" size="small" :icon="MoreFilled" circle />
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item @click="handleEdit">
-              <span>编辑</span>
-            </el-dropdown-item>
-            <el-dropdown-item @click="handleToggleShare">
-              {{ item.isShared ? '取消共享' : '共享' }}
-            </el-dropdown-item>
-            <el-dropdown-item class="danger-item" divided @click="handleRemove">
-              删除
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </div>
   </el-card>
 </template>
 
@@ -162,10 +121,15 @@ const handleToggleShare = async () => {
 
 .doc-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.doc-title-wrap {
+  flex: 1;
+  min-width: 0;
 }
 
 .doc-title {
@@ -181,37 +145,31 @@ const handleToggleShare = async () => {
 .doc-tags {
   display: flex;
   gap: 6px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  margin-top: 8px;
 }
 
 .doc-meta {
   color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-label-medium);
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  padding-top: 10px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .doc-actions {
-  margin-top: 8px;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.more-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  opacity: 0;
-  transform: translateX(4px);
-  transition: opacity var(--md-sys-transition-medium) ease, transform var(--md-sys-transition-medium) ease;
-}
+@media (max-width: 720px) {
+  .doc-header {
+    flex-direction: column;
+  }
 
-.doc-card:hover .more-btn {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-:deep(.danger-item) {
-  color: var(--md-sys-color-error);
+  .doc-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 </style>

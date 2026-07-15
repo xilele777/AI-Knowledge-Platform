@@ -10,11 +10,14 @@ import {
   normalizeKnowledgeQaConfig,
   updateKnowledgeBaseQaConfig,
 } from '@/api/knowledge'
+import { useListCacheStore } from '@/stores/listCache'
+import { apiDedupe } from '@/utils/apiDedupe'
 import type { ChatListItem } from '@/types/chat'
 import type { KnowledgeBaseListItem, KnowledgeQaConfig } from '@/types/knowledge'
 
 export interface UseChatSessionReturn {
   // 状态
+  listCacheStore: ReturnType<typeof useListCacheStore>
   knowledgeBases: Ref<KnowledgeBaseListItem[]>
   chats: Ref<ChatListItem[]>
   activeChatId: Ref<string>
@@ -35,8 +38,8 @@ export interface UseChatSessionReturn {
   canSaveQaConfig: ComputedRef<boolean>
 
   // 方法
-  loadKnowledgeBases: () => Promise<void>
-  loadChats: () => Promise<void>
+  loadKnowledgeBases: (opts?: { silent?: boolean; preferCache?: boolean }) => Promise<void>
+  loadChats: (opts?: { silent?: boolean; preferCache?: boolean }) => Promise<void>
   switchChat: (chat: ChatListItem) => void
   resetDraftSession: () => void
   ensureActiveChat: (question: string) => Promise<string>
@@ -57,6 +60,8 @@ export interface UseChatSessionReturn {
  * - QA 配置表单与持久化
  */
 export function useChatSession() {
+  const listCacheStore = useListCacheStore()
+
   // ─── 状态 ───
   const knowledgeBases = ref<KnowledgeBaseListItem[]>([])
   const chats = ref<ChatListItem[]>([])
@@ -132,26 +137,66 @@ export function useChatSession() {
   )
 
   // ─── 知识库 ───
-  async function loadKnowledgeBases() {
-    const result = await getMyKnowledgeBases()
-    if (!result.success || !result.data) {
-      throw new Error(result.error || '获取知识库失败')
+  async function loadKnowledgeBases(opts?: { silent?: boolean; preferCache?: boolean }) {
+    if (opts?.preferCache && listCacheStore.knowledgeBases) {
+      knowledgeBases.value = listCacheStore.getData(listCacheStore.knowledgeBases) ?? []
     }
-    knowledgeBases.value = result.data
+
+    const runner = async () => {
+      const result = await apiDedupe.dedupe('knowledgeBases:list', () => getMyKnowledgeBases())
+      if (!result.success || !result.data) {
+        throw new Error(result.error || '获取知识库失败')
+      }
+      listCacheStore.setKnowledgeBases(result.data)
+      knowledgeBases.value = result.data
+    }
+
+    if (opts?.silent && knowledgeBases.value.length > 0) {
+      try {
+        await runner()
+      } catch {
+        // 静默刷新失败时保留旧数据
+      }
+      return
+    }
+
+    await runner()
   }
 
   // ─── 会话 CRUD ───
-  async function loadChats() {
-    loadingChats.value = true
-    try {
-      const result = await getMyChats(100)
-      if (!result.success) {
-        throw new Error(result.error || '获取会话列表失败')
-      }
-      chats.value = result.data || []
+  async function loadChats(opts?: { silent?: boolean; preferCache?: boolean }) {
+    if (opts?.preferCache && listCacheStore.chats) {
+      chats.value = listCacheStore.getData(listCacheStore.chats) ?? []
       if (!activeChatId.value && chats.value.length > 0) {
         activeChatId.value = chats.value[0].id
       }
+    }
+
+    const runner = async () => {
+      const result = await apiDedupe.dedupe('chats:list', () => getMyChats(100))
+      if (!result.success) {
+        throw new Error(result.error || '获取会话列表失败')
+      }
+      const next = result.data || []
+      listCacheStore.setChats(next)
+      chats.value = next
+      if (!activeChatId.value && chats.value.length > 0) {
+        activeChatId.value = chats.value[0].id
+      }
+    }
+
+    if (opts?.silent && chats.value.length > 0) {
+      try {
+        await runner()
+      } catch {
+        // 静默刷新失败时保留旧数据
+      }
+      return
+    }
+
+    loadingChats.value = true
+    try {
+      await runner()
     } finally {
       loadingChats.value = false
     }
@@ -159,7 +204,9 @@ export function useChatSession() {
 
   function prependOrUpdateChat(chat: ChatListItem) {
     const without = chats.value.filter((item) => item.id !== chat.id)
-    chats.value = [chat, ...without]
+    const next = [chat, ...without]
+    chats.value = next
+    listCacheStore.setChats(next)
   }
 
   function switchChat(chat: ChatListItem) {
@@ -219,6 +266,7 @@ export function useChatSession() {
       }
 
       chats.value = chats.value.filter((chat) => chat.id !== chatId)
+      listCacheStore.removeChat(chatId)
       ElMessage.success('会话已删除')
       return true
     } catch (error) {
@@ -250,6 +298,7 @@ export function useChatSession() {
         if (item.id !== selectedKnowledgeBaseId.value) return item
         return { ...item, qaConfig: savedConfig }
       })
+      listCacheStore.setKnowledgeBases(knowledgeBases.value)
 
       ElMessage.success('已保存为当前知识库默认问答配置')
     } catch (error) {
@@ -263,7 +312,15 @@ export function useChatSession() {
     applyQaConfigFromSelectedKnowledgeBase()
   }
 
+  listCacheStore.registerRevalidator('knowledgeBases', () =>
+    loadKnowledgeBases({ silent: true, preferCache: true }),
+  )
+  listCacheStore.registerRevalidator('chats', () =>
+    loadChats({ silent: true, preferCache: true }),
+  )
+
   return {
+    listCacheStore,
     knowledgeBases,
     chats,
     activeChatId,

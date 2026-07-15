@@ -83,8 +83,21 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        name: 'AdminHome',
-        component: () => import('../views/admin/AdminHomeView.vue'),
+        redirect: (to) => {
+          const tab = typeof to.query.tab === 'string' ? to.query.tab : ''
+
+          if (tab === 'users') return '/admin/users'
+          if (tab === 'content') return '/admin/docs'
+          if (tab === 'analytics' || tab === 'overview') return '/admin/dashboard'
+          if (tab === 'operations') return '/admin/operation-logs'
+
+          return '/admin/dashboard'
+        },
+      },
+      {
+        path: 'dashboard',
+        name: 'AdminDashboard',
+        component: () => import('../views/admin/AdminAnalyticsView.vue'),
       },
       {
         path: 'users',
@@ -102,14 +115,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminFilesView.vue'),
       },
       {
-        path: 'chats',
-        name: 'AdminChats',
-        component: () => import('../views/admin/AdminChatsView.vue'),
+        path: 'analytics',
+        redirect: '/admin/dashboard',
       },
       {
-        path: 'analytics',
-        name: 'AdminAnalytics',
-        component: () => import('../views/admin/AdminAnalyticsView.vue'),
+        path: 'operation-logs',
+        name: 'AdminOperationLogs',
+        component: () => import('../views/admin/AdminOperationLogsView.vue'),
       },
     ],
   },

@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { MdPreview } from 'md-editor-v3'
+import { MdPreview, type Themes } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import { getSharedDocumentById } from '../../api/documents'
+import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
+import { track } from '../../utils/tracker'
 import type { Document } from '../../types/document'
 import PageContainer from '@/components/shared/PageContainer.vue'
-import { useDarkMode } from '@/composables/useDarkMode'
 
 const router = useRouter()
 const route = useRoute()
-const darkMode = useDarkMode()
 const loading = ref(false)
 const doc = ref<Document | null>(null)
 const errorMessage = ref('')
 
-const previewTheme = computed(() => (darkMode.isDark.value ? 'dark' : 'light'))
+const previewTheme = computed<Themes>(() => 'light')
 
 const loadDocument = async () => {
   const id = route.params.id as string
@@ -37,6 +37,11 @@ const loadDocument = async () => {
     }
 
     doc.value = result.data
+    void track(ANALYTICS_EVENTS.SHARED_DOC_VIEW, {
+      document_id: result.data.id,
+      title: result.data.title,
+      shared_at: result.data.sharedAt,
+    })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '获取文档失败'
   } finally {
@@ -67,7 +72,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageContainer width="narrow" v-loading="loading">
+  <PageContainer width="default" v-loading="loading">
     <div v-if="errorMessage" class="error-container">
       <el-alert :title="errorMessage" type="error" show-icon :closable="false" />
       <el-button type="primary" class="error-back-btn" @click="goBack">返回共享广场</el-button>
@@ -79,11 +84,19 @@ onMounted(() => {
         <el-tag type="success" effect="plain" size="small">共享文档</el-tag>
       </div>
 
-      <h1 class="doc-title">{{ doc.title }}</h1>
-      <div class="doc-meta">更新于 {{ formattedTime }}</div>
+      <div class="article-shell">
+        <header class="article-head">
+          <h1 class="doc-title">{{ doc.title }}</h1>
+          <div class="doc-meta-row">
+            <span class="doc-meta">作者 {{ doc.ownerName || '未署名用户' }}</span>
+            <span class="meta-divider">·</span>
+            <span class="doc-meta">更新于 {{ formattedTime }}</span>
+          </div>
+        </header>
 
-      <div class="doc-content">
-        <MdPreview :model-value="doc.content" :theme="previewTheme" language="zh-CN" />
+        <div class="doc-content">
+          <MdPreview :model-value="doc.content" :theme="previewTheme" language="zh-CN" />
+        </div>
       </div>
     </article>
   </PageContainer>
@@ -106,33 +119,69 @@ onMounted(() => {
   margin: 0 0 20px -8px;
 }
 
+.doc-article {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.article-shell {
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface-container-lowest);
+  padding: 28px 32px;
+  box-shadow: var(--md-sys-elevation-level-1);
+}
+
+.article-head {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
 .doc-title {
   margin: 0;
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   letter-spacing: -0.4px;
   line-height: 1.3;
   color: var(--md-sys-color-on-surface);
 }
 
+.doc-meta-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .doc-meta {
-  margin-top: 8px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
   color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-body-small);
 }
 
+.meta-divider {
+  color: var(--md-sys-color-outline-variant);
+}
+
 .doc-content {
-  padding-top: 8px;
+  padding-top: 20px;
 }
 
 :deep(.md-editor-preview-wrapper) {
   padding: 12px 0;
 }
 
-/* 让预览背景融入页面，而不是编辑器内嵌白块 */
 :deep(.md-editor-previewOnly) {
   background: transparent;
+}
+
+@media (max-width: 768px) {
+  .article-shell {
+    padding: 22px 20px;
+  }
+
+  .doc-title {
+    font-size: 28px;
+  }
 }
 </style>

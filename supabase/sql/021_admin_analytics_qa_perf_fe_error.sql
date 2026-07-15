@@ -1,5 +1,6 @@
--- Admin analytics RPC for dashboard metrics and trends.
--- Run this SQL in Supabase SQL Editor.
+-- Extend admin_get_analytics_overview with QA latency percentiles (qa_perf)
+-- and frontend runtime error stats (fe_error).
+-- Run this SQL in Supabase SQL Editor. Fully replaces the function from 005.
 
 create or replace function public.admin_get_analytics_overview(
   p_days integer default null,
@@ -35,6 +36,8 @@ declare
   v_login_trend jsonb := '[]'::jsonb;
   v_ai_call_trend jsonb := '[]'::jsonb;
   v_top_events jsonb := '[]'::jsonb;
+  v_qa_perf jsonb := jsonb_build_object('sampleCount', 0);
+  v_fe_error jsonb := jsonb_build_object('total', 0, 'bySource', '[]'::jsonb, 'topMessages', '[]'::jsonb);
 begin
   if auth.uid() is null then
     raise exception 'Unauthorized';
@@ -217,6 +220,62 @@ begin
       order by cnt desc, event_name asc
       limit 8
     ) t;
+
+    -- QA 链路分段耗时分位（retrieval / ttft / stream / total），单位 ms。
+    -- percentile_cont 自动忽略 null，样本不足时对应分位返回 null。
+    with qa as (
+      select
+        nullif(payload ->> 'retrieval_ms', '')::numeric as retrieval_ms,
+        nullif(payload ->> 'ttft_ms', '')::numeric as ttft_ms,
+        nullif(payload ->> 'stream_ms', '')::numeric as stream_ms,
+        nullif(payload ->> 'total_ms', '')::numeric as total_ms
+      from public.analytics_events
+      where event_name = 'qa_perf'
+        and created_at >= v_start_date
+        and created_at < (v_end_date + interval '1 day')
+    )
+    select jsonb_build_object(
+      'sampleCount', count(*),
+      'retrievalP50', round(percentile_cont(0.5) within group (order by retrieval_ms)::numeric),
+      'retrievalP95', round(percentile_cont(0.95) within group (order by retrieval_ms)::numeric),
+      'ttftP50', round(percentile_cont(0.5) within group (order by ttft_ms)::numeric),
+      'ttftP95', round(percentile_cont(0.95) within group (order by ttft_ms)::numeric),
+      'streamP50', round(percentile_cont(0.5) within group (order by stream_ms)::numeric),
+      'streamP95', round(percentile_cont(0.95) within group (order by stream_ms)::numeric),
+      'totalP50', round(percentile_cont(0.5) within group (order by total_ms)::numeric),
+      'totalP95', round(percentile_cont(0.95) within group (order by total_ms)::numeric)
+    )
+    into v_qa_perf
+    from qa;
+
+    -- 前端运行时错误：总量 + 按来源分布 + Top 错误消息。
+    with fe as (
+      select
+        coalesce(nullif(payload ->> 'source', ''), 'unknown') as source,
+        coalesce(nullif(payload ->> 'message', ''), '(空消息)') as message
+      from public.analytics_events
+      where event_name = 'fe_error'
+        and created_at >= v_start_date
+        and created_at < (v_end_date + interval '1 day')
+    )
+    select jsonb_build_object(
+      'total', (select count(*) from fe),
+      'bySource', coalesce((
+        select jsonb_agg(jsonb_build_object('source', source, 'count', cnt) order by cnt desc, source asc)
+        from (select source, count(*)::bigint as cnt from fe group by source) s
+      ), '[]'::jsonb),
+      'topMessages', coalesce((
+        select jsonb_agg(jsonb_build_object('message', message, 'count', cnt) order by cnt desc, message asc)
+        from (
+          select message, count(*)::bigint as cnt
+          from fe
+          group by message
+          order by count(*) desc, message asc
+          limit 5
+        ) m
+      ), '[]'::jsonb)
+    )
+    into v_fe_error;
   end if;
 
   return jsonb_build_object(
@@ -232,13 +291,13 @@ begin
     'avgAiCallsPerDay', round(v_ai_call_total::numeric / v_days, 2),
     'loginTrend', v_login_trend,
     'aiCallTrend', v_ai_call_trend,
-    'topEvents', v_top_events
+    'topEvents', v_top_events,
+    'qaPerf', v_qa_perf,
+    'feError', v_fe_error
   );
 end;
 $$;
 
 grant execute on function public.admin_get_analytics_overview(integer, date, date) to authenticated;
-
-drop function if exists public.admin_get_analytics_overview(integer);
 
 notify pgrst, 'reload schema';

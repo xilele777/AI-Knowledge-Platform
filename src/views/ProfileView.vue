@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useAiConfigStore } from '@/stores/aiConfig'
 import { saveUserAiConfig, deleteUserAiConfig } from '@/api/userAiConfig'
 import { getSystemAiConfig, saveSystemAiConfig } from '@/api/systemAiConfig'
-import { getMyDocuments } from '@/api/documents'
+import { getDashboardStats } from '@/api/documents'
+import { getMyProfile, updateMyProfile } from '@/api/profile'
 import type { UserAiConfig, SystemAiConfig } from '@/types/ai'
 import { resolveAiConfigFromUserConfig, isAiConfigComplete } from '@/utils/aiConfig'
 import { testChatApi, testEmbeddingApi, type ConnectivityResult } from '@/utils/aiConnectivity'
@@ -13,11 +14,14 @@ import { testChatApi, testEmbeddingApi, type ConnectivityResult } from '@/utils/
 const userStore = useUserStore()
 const aiConfigStore = useAiConfigStore()
 
-type TabKey = 'aiConfig' | 'systemEmbedding'
-const activeTab = ref<TabKey>('aiConfig')
+type TabKey = 'profile' | 'aiConfig' | 'systemEmbedding'
+const activeTab = ref<TabKey>('profile')
 
 const tabs = computed(() => {
-  const items: Array<{ key: TabKey; label: string }> = [{ key: 'aiConfig', label: 'AI 配置' }]
+  const items: Array<{ key: TabKey; label: string }> = [
+    { key: 'profile', label: '个人资料' },
+    { key: 'aiConfig', label: 'AI 配置' },
+  ]
   if (userStore.isAdmin) {
     items.push({ key: 'systemEmbedding', label: '系统向量' })
   }
@@ -27,14 +31,18 @@ const tabs = computed(() => {
 function switchTab(key: TabKey) {
   activeTab.value = key
   if (key === 'systemEmbedding') {
-    loadSystemConfig()
+    void loadSystemConfig()
   }
 }
 
-// ── 用户对话 API 配置 ──
 const loading = ref(false)
 const saving = ref(false)
 const docCount = ref<number>(0)
+const profileLoading = ref(false)
+const profileSaving = ref(false)
+const profileForm = ref({
+  fullName: '',
+})
 
 const config = ref<UserAiConfig>({
   apiBaseUrl: '',
@@ -47,12 +55,56 @@ const isConfigComplete = computed(() => {
   return isAiConfigComplete(resolved)
 })
 
+const displayName = computed(() => profileForm.value.fullName.trim() || userStore.email || '未登录用户')
+
 async function loadDocCount() {
   try {
-    const result = await getMyDocuments()
-    docCount.value = result.success ? (result.data?.length ?? 0) : 0
+    const result = await getDashboardStats()
+    docCount.value = result.success ? (result.data?.totalDocs ?? 0) : 0
   } catch {
-    // silently fail
+    // ignore
+  }
+}
+
+async function loadProfile() {
+  profileLoading.value = true
+  try {
+    const result = await getMyProfile()
+    if (result.success && result.data) {
+      profileForm.value.fullName = result.data.fullName || ''
+      return
+    }
+
+    profileForm.value.fullName = userStore.user?.user_metadata?.full_name
+      || userStore.user?.user_metadata?.name
+      || userStore.email
+      || ''
+  } catch {
+    profileForm.value.fullName = userStore.email || ''
+  } finally {
+    profileLoading.value = false
+  }
+}
+
+async function saveProfile() {
+  profileSaving.value = true
+  try {
+    const result = await updateMyProfile({
+      fullName: profileForm.value.fullName,
+    })
+
+    if (!result.success || !result.data) {
+      ElMessage.error(result.error || '保存资料失败')
+      return
+    }
+
+    profileForm.value.fullName = result.data.fullName
+    await userStore.initialize()
+    ElMessage.success('个人资料已更新')
+  } catch {
+    ElMessage.error('保存资料失败')
+  } finally {
+    profileSaving.value = false
   }
 }
 
@@ -107,7 +159,6 @@ async function clearConfig() {
   }
 }
 
-// ── 系统向量配置（仅管理员）──
 const sysConfig = ref<SystemAiConfig>({
   embeddingBaseUrl: '',
   embeddingApiKey: '',
@@ -115,7 +166,6 @@ const sysConfig = ref<SystemAiConfig>({
 })
 const sysLoading = ref(false)
 const sysSaving = ref(false)
-// 是否已有生效配置：已配置后再修改会导致存量向量与新模型不兼容，需要二次确认
 const sysConfigured = ref(false)
 
 async function loadSystemConfig() {
@@ -170,8 +220,6 @@ async function saveSystemConfig() {
   }
 }
 
-// ── 连通性测试 ──
-// 与 supabase/sql/014 中 pgvector 列的维度保持一致
 const EXPECTED_EMBEDDING_DIMENSION = 1024
 
 const testingChat = ref(false)
@@ -214,12 +262,11 @@ const sysDimensionMismatch = computed(() => {
   )
 })
 
-// ── 头像 ──
 const emailHash = computed(() => {
-  const email = userStore.email || 'user@example.com'
+  const text = displayName.value || userStore.email || '用户'
   let hash = 0
-  for (let i = 0; i < email.length; i++) {
-    hash = email.charCodeAt(i) + ((hash << 5) - hash)
+  for (let i = 0; i < text.length; i++) {
+    hash = text.charCodeAt(i) + ((hash << 5) - hash)
   }
   return Math.abs(hash)
 })
@@ -230,33 +277,30 @@ const avatarColor = computed(() => {
 })
 
 const initials = computed(() => {
-  const email = userStore.email || 'U'
-  if (email.includes('@')) {
-    return email.charAt(0).toUpperCase()
-  }
-  return email.slice(0, 2).toUpperCase()
+  const text = displayName.value.trim()
+  if (!text) return 'U'
+  return text.slice(0, 2).toUpperCase()
 })
 
 onMounted(() => {
-  loadDocCount()
-  loadConfig()
+  void Promise.all([loadDocCount(), loadConfig(), loadProfile()])
 })
 </script>
 
 <template>
   <div class="profile-page">
-    <!-- 账号头部 -->
     <header class="account-header">
       <div class="account-avatar" :style="{ background: avatarColor }">
         {{ initials }}
       </div>
       <div class="account-info">
         <div class="account-line">
-          <h2 class="account-email">{{ userStore.email || '未登录' }}</h2>
+          <h2 class="account-email">{{ displayName }}</h2>
           <el-tag v-if="userStore.isAdmin" type="warning" size="small" effect="plain" round>
             管理员
           </el-tag>
         </div>
+        <div class="account-subline">{{ userStore.email || '未登录' }}</div>
         <div class="account-meta">
           <span>{{ docCount }} 篇文档</span>
           <span class="meta-divider">·</span>
@@ -267,7 +311,6 @@ onMounted(() => {
       </div>
     </header>
 
-    <!-- 水平 Tab -->
     <nav class="tab-bar">
       <button
         v-for="tab in tabs"
@@ -281,34 +324,44 @@ onMounted(() => {
       </button>
     </nav>
 
-    <!-- AI 配置 -->
-    <section v-if="activeTab === 'aiConfig'" class="tab-panel" v-loading="loading">
+    <section v-if="activeTab === 'profile'" class="tab-panel profile-panel" v-loading="profileLoading">
+      <div class="profile-panel-head">
+        <div>
+          <h3 class="section-title">基础资料</h3>
+          <p class="panel-lead">姓名与昵称按同一字段处理，后续共享广场会直接显示这里填写的名称。</p>
+        </div>
+      </div>
+
+      <el-form label-position="top" class="config-form profile-form">
+        <el-form-item label="姓名 / 昵称">
+          <el-input v-model="profileForm.fullName" maxlength="32" show-word-limit placeholder="请输入你的展示名称" />
+        </el-form-item>
+        <el-form-item label="账号邮箱">
+          <el-input :model-value="userStore.email || ''" disabled />
+        </el-form-item>
+      </el-form>
+
+      <footer class="panel-actions profile-actions">
+        <el-button type="primary" @click="saveProfile" :loading="profileSaving">保存资料</el-button>
+      </footer>
+    </section>
+
+    <section v-else-if="activeTab === 'aiConfig'" class="tab-panel" v-loading="loading">
       <p class="panel-lead">
-        填写你自己的对话模型 API（任意 OpenAI 兼容接口，无需支持
-        Embedding）。Key 存储在服务端，仅你本人可见。文档向量化由系统统一提供。
+        填写你自己的对话模型 API（任意 OpenAI 兼容接口，无需支持 Embedding）。Key 存储在服务端，仅你本人可见。文档向量化由系统统一提供。
       </p>
 
       <el-form label-position="top" class="config-form">
         <div class="form-row">
           <el-form-item label="API Base URL" class="grow">
-            <el-input
-              v-model="config.apiBaseUrl"
-              placeholder="https://api.openai.com/v1"
-              clearable
-            />
+            <el-input v-model="config.apiBaseUrl" placeholder="https://api.openai.com/v1" clearable />
           </el-form-item>
           <el-form-item label="Model" class="grow">
             <el-input v-model="config.model" placeholder="gpt-4o-mini" clearable />
           </el-form-item>
         </div>
         <el-form-item label="API Key">
-          <el-input
-            v-model="config.apiKey"
-            type="password"
-            placeholder="sk-..."
-            show-password
-            clearable
-          />
+          <el-input v-model="config.apiKey" type="password" placeholder="sk-..." show-password clearable />
         </el-form-item>
       </el-form>
 
@@ -320,9 +373,7 @@ onMounted(() => {
         class="test-result"
       >
         <template #title>
-          <span v-if="chatTestResult.success">
-            连接成功，耗时 {{ chatTestResult.latencyMs }} ms，可以保存使用
-          </span>
+          <span v-if="chatTestResult.success">连接成功，耗时 {{ chatTestResult.latencyMs }} ms，可以保存使用</span>
           <span v-else>连接失败：{{ chatTestResult.error }}</span>
         </template>
       </el-alert>
@@ -334,42 +385,22 @@ onMounted(() => {
       </footer>
     </section>
 
-    <!-- 系统向量（仅管理员） -->
-    <section
-      v-if="activeTab === 'systemEmbedding' && userStore.isAdmin"
-      class="tab-panel"
-      v-loading="sysLoading"
-    >
+    <section v-else-if="activeTab === 'systemEmbedding' && userStore.isAdmin" class="tab-panel" v-loading="sysLoading">
       <p class="panel-lead">
-        平台级 Embedding API，全部用户的文档入库与检索共用。
-        <strong>配置生效后请勿再修改</strong>——更换模型会使已入库的全部向量失效，需重建索引。
+        平台级 Embedding API，全部用户的文档入库与检索共用。<strong>配置生效后请勿再修改</strong>——更换模型会使已入库的全部向量失效，需重建索引。
       </p>
 
       <el-form label-position="top" class="config-form">
         <div class="form-row">
           <el-form-item label="Base URL" class="grow">
-            <el-input
-              v-model="sysConfig.embeddingBaseUrl"
-              placeholder="https://api.siliconflow.cn/v1"
-              clearable
-            />
+            <el-input v-model="sysConfig.embeddingBaseUrl" placeholder="https://api.siliconflow.cn/v1" clearable />
           </el-form-item>
           <el-form-item label="Embedding 模型" class="grow">
-            <el-input
-              v-model="sysConfig.embeddingModel"
-              placeholder="Qwen/Qwen3-Embedding-0.6B"
-              clearable
-            />
+            <el-input v-model="sysConfig.embeddingModel" placeholder="Qwen/Qwen3-Embedding-0.6B" clearable />
           </el-form-item>
         </div>
         <el-form-item label="API Key">
-          <el-input
-            v-model="sysConfig.embeddingApiKey"
-            type="password"
-            placeholder="服务端使用，普通用户不可见"
-            show-password
-            clearable
-          />
+          <el-input v-model="sysConfig.embeddingApiKey" type="password" placeholder="服务端使用，普通用户不可见" show-password clearable />
         </el-form-item>
       </el-form>
 
@@ -382,22 +413,17 @@ onMounted(() => {
       >
         <template #title>
           <span v-if="sysTestResult.success && sysDimensionMismatch">
-            接口可用（{{ sysTestResult.latencyMs }} ms），但向量维度为
-            {{ sysTestResult.dimension }}，与数据库 pgvector 列的
-            {{ EXPECTED_EMBEDDING_DIMENSION }} 维不一致——保存前需先执行迁移调整列维度，否则入库会失败
+            接口可用（{{ sysTestResult.latencyMs }} ms），但向量维度为 {{ sysTestResult.dimension }}，与数据库 pgvector 列的 {{ EXPECTED_EMBEDDING_DIMENSION }} 维不一致——保存前需先执行迁移调整列维度，否则入库会失败
           </span>
           <span v-else-if="sysTestResult.success">
-            连接成功，耗时 {{ sysTestResult.latencyMs }} ms，向量维度
-            {{ sysTestResult.dimension }}，与数据库一致
+            连接成功，耗时 {{ sysTestResult.latencyMs }} ms，向量维度 {{ sysTestResult.dimension }}，与数据库一致
           </span>
           <span v-else>连接失败：{{ sysTestResult.error }}</span>
         </template>
       </el-alert>
 
       <footer class="panel-actions">
-        <el-button type="primary" @click="saveSystemConfig" :loading="sysSaving">
-          保存系统配置
-        </el-button>
+        <el-button type="primary" @click="saveSystemConfig" :loading="sysSaving">保存系统配置</el-button>
         <el-button @click="runSysTest" :loading="testingSys">测试连接</el-button>
       </footer>
     </section>
@@ -406,12 +432,11 @@ onMounted(() => {
 
 <style scoped>
 .profile-page {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 8px 4px;
 }
 
-/* ── 账号头部 ── */
 .account-header {
   display: flex;
   align-items: center;
@@ -453,8 +478,14 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.account-meta {
+.account-subline {
   margin-top: 4px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-small);
+}
+
+.account-meta {
+  margin-top: 6px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -470,7 +501,6 @@ onMounted(() => {
   color: var(--accent-emerald);
 }
 
-/* ── Tab 栏 ── */
 .tab-bar {
   display: flex;
   gap: 4px;
@@ -501,9 +531,26 @@ onMounted(() => {
   border-bottom-color: var(--module-chat);
 }
 
-/* ── 面板 ── */
+.profile-panel,
+.tab-panel {
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 24px;
+  background: var(--md-sys-color-surface-container-lowest);
+  padding: 24px;
+}
+
+.profile-panel-head {
+  margin-bottom: 16px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--md-sys-typescale-title-medium);
+  font-weight: 700;
+}
+
 .panel-lead {
-  margin: 0 0 20px;
+  margin: 6px 0 0;
   font-size: var(--md-sys-typescale-body-medium);
   color: var(--md-sys-color-on-surface-variant);
   line-height: 1.7;
@@ -523,6 +570,10 @@ onMounted(() => {
   min-width: 0;
 }
 
+.profile-form :deep(.el-input.is-disabled .el-input__wrapper) {
+  background: var(--md-sys-color-surface-container-low);
+}
+
 .test-result {
   margin-bottom: 16px;
 }
@@ -530,15 +581,27 @@ onMounted(() => {
 .panel-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-top: 4px;
+  gap: 8px;
+  padding-top: 8px;
 }
 
-/* ── 响应式 ── */
+.profile-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 640px) {
   .form-row {
     flex-direction: column;
     gap: 0;
+  }
+
+  .account-header {
+    align-items: flex-start;
+  }
+
+  .profile-panel,
+  .tab-panel {
+    padding: 20px;
   }
 }
 </style>

@@ -10,6 +10,9 @@ import SearchInput from '@/components/shared/SearchInput.vue'
 import KnowledgeCard from './components/KnowledgeCard.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
+import { useAsyncState } from '@/composables/useAsyncState'
+import { useListCacheStore } from '@/stores/listCache'
+import { apiDedupe } from '@/utils/apiDedupe'
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
 
@@ -20,13 +23,13 @@ interface CreateKbForm {
 
 const router = useRouter()
 const route = useRoute()
+const knowledgeState = useAsyncState<KnowledgeBaseListItem[]>({ initialData: [] })
+const listCacheStore = useListCacheStore()
 
-const loading = ref(false)
 const deleting = ref(false)
 const creating = ref(false)
 const createDialogVisible = ref(false)
 const errorMessage = ref('')
-const knowledgeBases = ref<KnowledgeBaseListItem[]>([])
 const searchKeyword = ref('')
 
 const createFormRef = ref<FormInstance>()
@@ -55,27 +58,38 @@ const filteredKnowledgeBases = computed(() => {
     return name.includes(keyword) || desc.includes(keyword)
   })
 })
+const knowledgeBases = computed(() => knowledgeState.data.value ?? [])
 
-async function loadKnowledgeBases() {
-  loading.value = true
+async function loadKnowledgeBases(opts?: { silent?: boolean; preferCache?: boolean }) {
   errorMessage.value = ''
 
-  try {
-    const result = await getMyKnowledgeBases()
+  if (opts?.preferCache && listCacheStore.knowledgeBases) {
+    knowledgeState.data.value = listCacheStore.getData(listCacheStore.knowledgeBases) ?? []
+  }
+
+  const runner = async () => {
+    const result = await apiDedupe.dedupe('knowledgeBases:list', () => getMyKnowledgeBases())
 
     if (!result.success) {
-      knowledgeBases.value = []
       errorMessage.value = result.error || '获取知识库列表失败'
-      return
+      throw new Error(errorMessage.value)
     }
 
-    knowledgeBases.value = result.data || []
-  } catch (error) {
-    knowledgeBases.value = []
-    errorMessage.value = error instanceof Error ? error.message : '获取知识库列表失败'
-  } finally {
-    loading.value = false
+    const next = result.data || []
+    listCacheStore.setKnowledgeBases(next)
+    return next
   }
+
+  if (opts?.silent && knowledgeState.data.value?.length) {
+    try {
+      knowledgeState.data.value = await runner()
+    } catch {
+      // 静默刷新失败时保留旧数据，仅展示错误提示
+    }
+    return
+  }
+
+  await knowledgeState.execute(runner)
 }
 
 function openCreateDialog() {
@@ -111,6 +125,7 @@ async function handleCreateKnowledgeBase() {
       return
     }
 
+    listCacheStore.invalidate('knowledgeBases')
     ElMessage.success('知识库创建成功')
     void track(ANALYTICS_EVENTS.KNOWLEDGE_BASE_CREATE, {
       knowledge_base_id: result.data.id,
@@ -144,7 +159,8 @@ async function handleDeleteKnowledgeBase(id: string) {
     }
 
     ElMessage.success('删除成功')
-    await loadKnowledgeBases()
+    listCacheStore.removeKnowledgeBase(id)
+    await loadKnowledgeBases({ silent: true, preferCache: true })
   } catch (error) {
     if (error instanceof Error && error.message) {
       if (error.message.includes('cancel')) {
@@ -161,12 +177,22 @@ function handleEnterDetail(id: string) {
   router.push('/knowledge/' + id)
 }
 
+const isLoading = computed(() => knowledgeState.isLoading.value)
+const showSkeleton = computed(() => knowledgeState.showSkeleton.value)
+
+listCacheStore.registerRevalidator('knowledgeBases', () =>
+  loadKnowledgeBases({ silent: true, preferCache: true }),
+)
+
 if (route.query.create === '1') {
   openCreateDialog()
   void router.replace({ path: route.path, query: { ...route.query, create: undefined } })
 }
 
-void loadKnowledgeBases()
+void loadKnowledgeBases({
+  preferCache: true,
+  silent: Boolean(listCacheStore.isFresh(listCacheStore.knowledgeBases)),
+})
 </script>
 
 <template>
@@ -177,7 +203,7 @@ void loadKnowledgeBases()
   >
     <template #actions>
       <SearchInput v-model="searchKeyword" placeholder="搜索知识库..." />
-      <el-button @click="loadKnowledgeBases">刷新</el-button>
+      <el-button @click="loadKnowledgeBases({ preferCache: true })">刷新</el-button>
       <el-button type="primary" @click="openCreateDialog">新建知识库</el-button>
     </template>
 
@@ -191,10 +217,10 @@ void loadKnowledgeBases()
     />
 
     <div class="content-wrapper">
-      <SkeletonCard v-if="loading" :count="6" variant="card" />
+      <SkeletonCard v-if="showSkeleton" :count="6" variant="card" />
 
       <EmptyStateActionable
-        v-else-if="!loading && filteredKnowledgeBases.length === 0"
+        v-else-if="!isLoading && filteredKnowledgeBases.length === 0"
         icon="knowledge"
         :title="knowledgeBases.length === 0 ? '还没有知识库' : '没有匹配的知识库'"
         :description="knowledgeBases.length === 0 ? '创建知识库，上传文档并开启 AI 智能问答' : ''"

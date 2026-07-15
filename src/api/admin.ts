@@ -7,18 +7,47 @@ export interface AdminApiResult<T> {
   error: string | null
 }
 
+export interface AdminPageQuery {
+  page?: number
+  pageSize?: number
+}
+
+export interface AdminPagedData<T> {
+  items: T[]
+  total: number
+}
+
 export interface AdminProfileItem {
   id: string
   email: string | null
   fullName: string | null
   role: string | null
   createdAt: string | null
+  isBanned?: boolean
+}
+
+export interface AdminUpdateUserRoleInput {
+  userId: string
+  role: 'user' | 'admin'
+}
+
+export interface AdminCreateUserInput {
+  email: string
+  password: string
+  fullName: string
+  role: 'user' | 'admin'
+}
+
+export interface AdminSetUserBanInput {
+  userId: string
+  banned: boolean
 }
 
 export interface AdminDocumentItem {
   id: string
   title: string
   status: string
+  isShared: boolean
   ownerId: string
   authorName: string | null
   authorEmail: string | null
@@ -38,20 +67,10 @@ export interface AdminKnowledgeFileItem {
   updatedAt: string
 }
 
-export interface AdminChatRecordItem {
-  chatId: string
-  messageId: string
-  title: string
-  ownerId: string
-  question: string
-  answer: string
-  createdAt: string
-  chatUpdatedAt: string
-}
-
 export interface AdminDashboardStats {
   userCount: number
   documentCount: number
+  knowledgeBaseCount: number
   fileCount: number
   chatCount: number
   messageCount: number
@@ -67,20 +86,119 @@ export interface AdminTopEventItem {
   count: number
 }
 
+export interface AdminQaPerfStats {
+  sampleCount: number
+  retrievalP50: number | null
+  retrievalP95: number | null
+  ttftP50: number | null
+  ttftP95: number | null
+  streamP50: number | null
+  streamP95: number | null
+  totalP50: number | null
+  totalP95: number | null
+}
+
+export interface AdminFeErrorSourceItem {
+  source: string
+  count: number
+}
+
+export interface AdminFeErrorMessageItem {
+  message: string
+  count: number
+}
+
+export interface AdminFeErrorStats {
+  total: number
+  bySource: AdminFeErrorSourceItem[]
+  topMessages: AdminFeErrorMessageItem[]
+}
+
 export interface AdminAnalyticsOverview {
   userCount: number
   documentCount: number
   knowledgeFileCount: number
   aiCallCount: number
-  login7dTotal: number
-  aiCall7dTotal: number
-  activeUser7d: number
-  documentCreated7d: number
-  fileCreated7d: number
+  loginTotal: number
+  aiCallTotal: number
+  activeUserCount: number
+  documentCreatedTotal: number
+  fileCreatedTotal: number
   avgAiCallsPerDay: number
   loginTrend: AdminTrendPoint[]
   aiCallTrend: AdminTrendPoint[]
   topEvents: AdminTopEventItem[]
+  qaPerf: AdminQaPerfStats
+  feError: AdminFeErrorStats
+}
+
+export interface AdminAnalyticsRangeInput {
+  days?: number
+  startDate?: string
+  endDate?: string
+}
+
+export interface AdminOperationLogItem {
+  id: string
+  actorUserId: string | null
+  actorEmail: string | null
+  action: string
+  targetType: string
+  targetId: string | null
+  targetLabel: string | null
+  status: string
+  details: Record<string, unknown>
+  createdAt: string
+}
+
+export interface AdminOperationLogQuery extends AdminPageQuery {
+  action?: string
+  targetType?: string
+  status?: string
+  search?: string
+}
+
+export interface AdminProfilesQuery extends AdminPageQuery {
+  search?: string
+  role?: 'user' | 'admin'
+}
+
+export interface AdminProfileStats {
+  total: number
+  admins: number
+  users: number
+  banned: number
+}
+
+export interface AdminProfilesPage extends AdminPagedData<AdminProfileItem> {
+  stats: AdminProfileStats
+}
+
+export interface AdminDocumentsQuery extends AdminPageQuery {
+  search?: string
+  shared?: boolean
+}
+
+export interface AdminDocumentStats {
+  total: number
+  shared: number
+  private: number
+}
+
+export interface AdminKnowledgeFilesQuery extends AdminPageQuery {
+  search?: string
+}
+
+export interface AdminKnowledgeFileStats {
+  total: number
+  processing: number
+  ready: number
+}
+
+export interface AdminOperationLogStats {
+  total: number
+  success: number
+  failure: number
 }
 
 type ProfileRow = {
@@ -98,6 +216,7 @@ type DocumentRow = {
   id: string
   title: string
   status: string
+  is_shared: boolean
   owner_id: string
   created_at: string
   updated_at: string
@@ -115,30 +234,30 @@ type KnowledgeFileRow = {
   updated_at: string
 }
 
-type ChatRow = {
-  id: string
-  owner_id: string
-  title: string
-  updated_at: string
-}
-
-type ChatMessageRow = {
-  id: string
-  chat_id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  created_at: string
-}
-
-const CHAT_TABLE = 'chats'
-const CHAT_MESSAGE_TABLE = 'chat_messages'
-
 type AdminProfileRpcRow = {
   id: string
   email: string | null
   full_name: string | null
   role: string | null
   created_at: string | null
+  is_banned?: boolean | null
+  filtered_count?: number | string | null
+  total_count?: number | string | null
+  admin_count?: number | string | null
+  banned_count?: number | string | null
+}
+
+type AdminOperationLogRow = {
+  id: string
+  actor_user_id: string | null
+  actor_email: string | null
+  action: string
+  target_type: string
+  target_id: string | null
+  target_label: string | null
+  status: string
+  details: Record<string, unknown> | null
+  created_at: string
 }
 
 function ok<T>(data?: T): AdminApiResult<T> {
@@ -178,6 +297,35 @@ function toNumber(value: unknown, fallback = 0): number {
   }
 
   return fallback
+}
+
+const DEFAULT_PAGE_SIZE = 10
+
+function resolvePage(query: AdminPageQuery): { from: number; to: number; pageSize: number } {
+  const pageSize = Math.max(1, Math.min(100, Math.floor(query.pageSize || DEFAULT_PAGE_SIZE)))
+  const page = Math.max(1, Math.floor(query.page || 1))
+  const from = (page - 1) * pageSize
+  return { from, to: from + pageSize - 1, pageSize }
+}
+
+function escapeIlike(keyword: string): string {
+  return keyword.replace(/[%_]/g, (char) => `\\${char}`)
+}
+
+async function countRows(tableName: string, match?: Record<string, unknown>): Promise<number> {
+  let builder = supabase.from(tableName).select('id', { count: 'exact', head: true })
+
+  if (match) {
+    builder = builder.match(match)
+  }
+
+  const { count, error } = await builder
+
+  if (error) {
+    return 0
+  }
+
+  return count ?? 0
 }
 
 function toTrendPoints(value: unknown): AdminTrendPoint[] {
@@ -230,6 +378,74 @@ function toTopEvents(value: unknown): AdminTopEventItem[] {
       }
     })
     .filter((item): item is AdminTopEventItem => Boolean(item))
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  const parsed = toNumber(value, Number.NaN)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function toQaPerfStats(value: unknown): AdminQaPerfStats {
+  const row = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
+  return {
+    sampleCount: toNumber(row.sampleCount),
+    retrievalP50: toNullableNumber(row.retrievalP50),
+    retrievalP95: toNullableNumber(row.retrievalP95),
+    ttftP50: toNullableNumber(row.ttftP50),
+    ttftP95: toNullableNumber(row.ttftP95),
+    streamP50: toNullableNumber(row.streamP50),
+    streamP95: toNullableNumber(row.streamP95),
+    totalP50: toNullableNumber(row.totalP50),
+    totalP95: toNullableNumber(row.totalP95),
+  }
+}
+
+function toFeErrorStats(value: unknown): AdminFeErrorStats {
+  const row = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
+
+  const bySource = Array.isArray(row.bySource)
+    ? row.bySource
+        .map((item) => {
+          const source = item as Record<string, unknown>
+          const name = typeof source.source === 'string' ? source.source : ''
+          return name ? { source: name, count: toNumber(source.count) } : null
+        })
+        .filter((item): item is AdminFeErrorSourceItem => Boolean(item))
+    : []
+
+  const topMessages = Array.isArray(row.topMessages)
+    ? row.topMessages
+        .map((item) => {
+          const message = item as Record<string, unknown>
+          const text = typeof message.message === 'string' ? message.message : ''
+          return text ? { message: text, count: toNumber(message.count) } : null
+        })
+        .filter((item): item is AdminFeErrorMessageItem => Boolean(item))
+    : []
+
+  return {
+    total: toNumber(row.total),
+    bySource,
+    topMessages,
+  }
+}
+
+function toOperationLogItem(row: AdminOperationLogRow): AdminOperationLogItem {
+  return {
+    id: row.id,
+    actorUserId: row.actor_user_id,
+    actorEmail: row.actor_email,
+    action: row.action,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    targetLabel: row.target_label,
+    status: row.status,
+    details: row.details ?? {},
+    createdAt: row.created_at,
+  }
 }
 
 function resolveProfileName(row: ProfileRow): string | null {
@@ -329,56 +545,80 @@ async function fetchProfilesByIds(userIds: string[]): Promise<Map<string, AdminP
   return profileMap
 }
 
-export async function getAdminProfiles(limit = 100): Promise<AdminApiResult<AdminProfileItem[]>> {
+export async function getAdminProfiles(
+  query: AdminProfilesQuery = {},
+): Promise<AdminApiResult<AdminProfilesPage>> {
   try {
     assertSupabaseConfigured()
 
-    // Prefer backend RPC so admin can view all auth users even when profiles is partially populated.
+    const { from, pageSize } = resolvePage(query)
+
     const rpcResult = await supabase.rpc('admin_get_profiles', {
-      p_limit: Math.max(1, Math.min(1000, Math.floor(limit || 100))),
+      p_limit: pageSize,
+      p_offset: from,
+      p_search: query.search?.trim() || null,
+      p_role: query.role || null,
     })
 
-    if (!rpcResult.error && Array.isArray(rpcResult.data)) {
-      const rpcItems: AdminProfileItem[] = (rpcResult.data as AdminProfileRpcRow[]).map((row) => ({
+    if (rpcResult.error) {
+      return fail(`获取用户列表失败：${rpcResult.error.message}。请先同步最新 SQL。`)
+    }
+
+    if (!Array.isArray(rpcResult.data)) {
+      return fail('获取用户列表失败：admin_get_profiles 返回结果异常')
+    }
+
+    const rows = rpcResult.data as AdminProfileRpcRow[]
+    const first = rows[0]
+    const totalUsers = toNumber(first?.total_count)
+    const adminUsers = toNumber(first?.admin_count)
+
+    return ok({
+      items: rows.map((row) => ({
         id: row.id,
         email: row.email,
         fullName: row.full_name,
         role: row.role,
         createdAt: row.created_at,
-      }))
-
-      return ok(rpcItems)
-    }
-
-    const { data, error } = await queryProfiles(limit)
-
-    if (error) {
-      return fail(error.message)
-    }
-
-    const items: AdminProfileItem[] = (data ?? []).map((row) => ({
-      id: row.id,
-      email: resolveProfileEmail(row),
-      fullName: resolveProfileName(row),
-      role: row.role ?? null,
-      createdAt: row.created_at ?? null,
-    }))
-
-    return ok(items)
+        isBanned: Boolean(row.is_banned),
+      })),
+      total: toNumber(first?.filtered_count),
+      stats: {
+        total: totalUsers,
+        admins: adminUsers,
+        users: Math.max(totalUsers - adminUsers, 0),
+        banned: toNumber(first?.banned_count),
+      },
+    })
   } catch (error) {
     return fail(normalizeError(error))
   }
 }
 
-export async function getAdminDocuments(limit = 100): Promise<AdminApiResult<AdminDocumentItem[]>> {
+export async function getAdminDocuments(
+  query: AdminDocumentsQuery = {},
+): Promise<AdminApiResult<AdminPagedData<AdminDocumentItem>>> {
   try {
     assertSupabaseConfigured()
 
-    const { data, error } = await supabase
+    const { from, to } = resolvePage(query)
+
+    let builder = supabase
       .from('documents')
-      .select('id, title, status, owner_id, created_at, updated_at')
+      .select('id, title, status, is_shared, owner_id, created_at, updated_at', { count: 'exact' })
+
+    if (typeof query.shared === 'boolean') {
+      builder = builder.eq('is_shared', query.shared)
+    }
+
+    const keyword = query.search?.trim()
+    if (keyword) {
+      builder = builder.ilike('title', `%${escapeIlike(keyword)}%`)
+    }
+
+    const { data, error, count } = await builder
       .order('updated_at', { ascending: false })
-      .limit(limit)
+      .range(from, to)
       .returns<DocumentRow[]>()
 
     if (error) {
@@ -396,6 +636,7 @@ export async function getAdminDocuments(limit = 100): Promise<AdminApiResult<Adm
         id: row.id,
         title: row.title,
         status: row.status,
+        isShared: row.is_shared,
         ownerId: row.owner_id,
         authorName: profile?.fullName ?? null,
         authorEmail: profile?.email ?? null,
@@ -404,23 +645,49 @@ export async function getAdminDocuments(limit = 100): Promise<AdminApiResult<Adm
       }
     })
 
-    return ok(items)
+    return ok({ items, total: count ?? items.length })
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function getAdminDocumentStats(): Promise<AdminApiResult<AdminDocumentStats>> {
+  try {
+    assertSupabaseConfigured()
+
+    const [total, shared] = await Promise.all([
+      countRows('documents'),
+      countRows('documents', { is_shared: true }),
+    ])
+
+    return ok({ total, shared, private: Math.max(total - shared, 0) })
   } catch (error) {
     return fail(normalizeError(error))
   }
 }
 
 export async function getAdminKnowledgeFiles(
-  limit = 100,
-): Promise<AdminApiResult<AdminKnowledgeFileItem[]>> {
+  query: AdminKnowledgeFilesQuery = {},
+): Promise<AdminApiResult<AdminPagedData<AdminKnowledgeFileItem>>> {
   try {
     assertSupabaseConfigured()
 
-    const { data, error } = await supabase
+    const { from, to } = resolvePage(query)
+
+    let builder = supabase
       .from('knowledge_files')
-      .select('id, file_name, status, knowledge_base_id, owner_id, file_size, mime_type, created_at, updated_at')
+      .select('id, file_name, status, knowledge_base_id, owner_id, file_size, mime_type, created_at, updated_at', {
+        count: 'exact',
+      })
+
+    const keyword = query.search?.trim()
+    if (keyword) {
+      builder = builder.ilike('file_name', `%${escapeIlike(keyword)}%`)
+    }
+
+    const { data, error, count } = await builder
       .order('updated_at', { ascending: false })
-      .limit(limit)
+      .range(from, to)
       .returns<KnowledgeFileRow[]>()
 
     if (error) {
@@ -439,134 +706,40 @@ export async function getAdminKnowledgeFiles(
       updatedAt: row.updated_at,
     }))
 
-    return ok(items)
+    return ok({ items, total: count ?? items.length })
   } catch (error) {
     return fail(normalizeError(error))
   }
 }
 
-export async function getAdminChatRecords(
-  limit = 200,
-): Promise<AdminApiResult<AdminChatRecordItem[]>> {
+export async function getAdminKnowledgeFileStats(): Promise<AdminApiResult<AdminKnowledgeFileStats>> {
   try {
     assertSupabaseConfigured()
 
-    const [chatRes, messageRes] = await Promise.all([
-      supabase
-        .from('chats')
-        .select('id, owner_id, title, updated_at')
-        .order('updated_at', { ascending: false })
-        .limit(limit)
-        .returns<ChatRow[]>(),
-      supabase
-        .from('chat_messages')
-        .select('id, chat_id, role, content, created_at')
-        .order('created_at', { ascending: false })
-        .limit(limit * 2)
-        .returns<ChatMessageRow[]>(),
+    const [total, processing, ready] = await Promise.all([
+      countRows('knowledge_files'),
+      countRows('knowledge_files', { status: 'processing' }),
+      countRows('knowledge_files', { status: 'ready' }),
     ])
 
-    if (chatRes.error) {
-      return fail(chatRes.error.message)
-    }
-
-    if (messageRes.error) {
-      return fail(messageRes.error.message)
-    }
-
-    const chats = chatRes.data ?? []
-    const messages = messageRes.data ?? []
-
-    const chatMap = new Map<string, ChatRow>()
-    for (const chat of chats) {
-      chatMap.set(chat.id, chat)
-    }
-
-    const groupedMessages = new Map<string, ChatMessageRow[]>()
-    for (const item of messages) {
-      if (!groupedMessages.has(item.chat_id)) {
-        groupedMessages.set(item.chat_id, [])
-      }
-
-      groupedMessages.get(item.chat_id)?.push(item)
-    }
-
-    const records: AdminChatRecordItem[] = []
-
-    for (const [chatId, group] of groupedMessages.entries()) {
-      const chat = chatMap.get(chatId)
-      if (!chat) {
-        continue
-      }
-
-      const ordered = [...group].sort((a, b) => {
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      })
-
-      let pendingQuestion: ChatMessageRow | null = null
-
-      for (const message of ordered) {
-        if (message.role === 'user') {
-          pendingQuestion = message
-          continue
-        }
-
-        if (message.role === 'assistant' && pendingQuestion) {
-          records.push({
-            chatId,
-            messageId: message.id,
-            title: chat.title,
-            ownerId: chat.owner_id,
-            question: pendingQuestion.content,
-            answer: message.content,
-            createdAt: message.created_at,
-            chatUpdatedAt: chat.updated_at,
-          })
-          pendingQuestion = null
-        }
-      }
-
-      if (pendingQuestion) {
-        records.push({
-          chatId,
-          messageId: pendingQuestion.id,
-          title: chat.title,
-          ownerId: chat.owner_id,
-          question: pendingQuestion.content,
-          answer: '',
-          createdAt: pendingQuestion.created_at,
-          chatUpdatedAt: chat.updated_at,
-        })
-      }
-    }
-
-    records.sort((a, b) => {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    })
-
-    return ok(records.slice(0, limit))
+    return ok({ total, processing, ready })
   } catch (error) {
     return fail(normalizeError(error))
   }
 }
 
 async function fetchTableCount(tableName: string): Promise<number> {
-  const { count, error } = await supabase.from(tableName).select('id', { count: 'exact', head: true })
-
-  if (error) {
-    return 0
-  }
-
-  return count ?? 0
+  return countRows(tableName)
 }
 
 export async function getAdminDashboardStats(): Promise<AdminApiResult<AdminDashboardStats>> {
   try {
     assertSupabaseConfigured()
 
-    const [userCount, documentCount, fileCount, chatCount, messageCount] = await Promise.all([
+    const [userCount, documentCount, knowledgeBaseCount, fileCount, chatCount, messageCount] = await Promise.all([
       fetchTableCount('profiles'),
       fetchTableCount('documents'),
+      fetchTableCount('knowledge_bases'),
       fetchTableCount('knowledge_files'),
       fetchTableCount('chats'),
       fetchTableCount('chat_messages'),
@@ -575,6 +748,7 @@ export async function getAdminDashboardStats(): Promise<AdminApiResult<AdminDash
     return ok({
       userCount,
       documentCount,
+      knowledgeBaseCount,
       fileCount,
       chatCount,
       messageCount,
@@ -585,16 +759,19 @@ export async function getAdminDashboardStats(): Promise<AdminApiResult<AdminDash
 }
 
 export async function getAdminAnalyticsOverview(
-  days = 7,
+  params: AdminAnalyticsRangeInput = { days: 7 },
 ): Promise<AdminApiResult<AdminAnalyticsOverview>> {
   try {
     assertSupabaseConfigured()
 
-    const normalizedDays = Math.max(1, Math.min(30, Math.floor(days || 7)))
+    const hasCustomRange = Boolean(params.startDate && params.endDate)
+    const normalizedDays = Math.max(1, Math.min(60, Math.floor(params.days || 7)))
 
     try {
       const edgePayload = await invokeEdgeFunction<Record<string, unknown>>('admin-analytics', {
-        days: normalizedDays,
+        days: hasCustomRange ? undefined : normalizedDays,
+        startDate: hasCustomRange ? params.startDate : undefined,
+        endDate: hasCustomRange ? params.endDate : undefined,
       })
       const payload = edgePayload || {}
 
@@ -603,22 +780,26 @@ export async function getAdminAnalyticsOverview(
         documentCount: toNumber(payload.documentCount),
         knowledgeFileCount: toNumber(payload.knowledgeFileCount),
         aiCallCount: toNumber(payload.aiCallCount),
-        login7dTotal: toNumber(payload.login7dTotal),
-        aiCall7dTotal: toNumber(payload.aiCall7dTotal),
-        activeUser7d: toNumber(payload.activeUser7d),
-        documentCreated7d: toNumber(payload.documentCreated7d),
-        fileCreated7d: toNumber(payload.fileCreated7d),
+        loginTotal: toNumber(payload.loginTotal),
+        aiCallTotal: toNumber(payload.aiCallTotal),
+        activeUserCount: toNumber(payload.activeUserCount),
+        documentCreatedTotal: toNumber(payload.documentCreatedTotal),
+        fileCreatedTotal: toNumber(payload.fileCreatedTotal),
         avgAiCallsPerDay: toNumber(payload.avgAiCallsPerDay),
         loginTrend: toTrendPoints(payload.loginTrend),
         aiCallTrend: toTrendPoints(payload.aiCallTrend),
         topEvents: toTopEvents(payload.topEvents),
+        qaPerf: toQaPerfStats(payload.qaPerf),
+        feError: toFeErrorStats(payload.feError),
       })
     } catch (error) {
       console.warn('[getAdminAnalyticsOverview] server proxy failed, fallback to RPC:', error)
     }
 
     const { data, error } = await supabase.rpc('admin_get_analytics_overview', {
-      p_days: normalizedDays,
+      p_days: hasCustomRange ? null : normalizedDays,
+      p_start_date: hasCustomRange ? params.startDate ?? null : null,
+      p_end_date: hasCustomRange ? params.endDate ?? null : null,
     })
 
     if (error) {
@@ -632,67 +813,102 @@ export async function getAdminAnalyticsOverview(
       documentCount: toNumber(payload.documentCount),
       knowledgeFileCount: toNumber(payload.knowledgeFileCount),
       aiCallCount: toNumber(payload.aiCallCount),
-      login7dTotal: toNumber(payload.login7dTotal),
-      aiCall7dTotal: toNumber(payload.aiCall7dTotal),
-      activeUser7d: toNumber(payload.activeUser7d),
-      documentCreated7d: toNumber(payload.documentCreated7d),
-      fileCreated7d: toNumber(payload.fileCreated7d),
+      loginTotal: toNumber(payload.loginTotal),
+      aiCallTotal: toNumber(payload.aiCallTotal),
+      activeUserCount: toNumber(payload.activeUserCount),
+      documentCreatedTotal: toNumber(payload.documentCreatedTotal),
+      fileCreatedTotal: toNumber(payload.fileCreatedTotal),
       avgAiCallsPerDay: toNumber(payload.avgAiCallsPerDay),
       loginTrend: toTrendPoints(payload.loginTrend),
       aiCallTrend: toTrendPoints(payload.aiCallTrend),
       topEvents: toTopEvents(payload.topEvents),
+      qaPerf: toQaPerfStats(payload.qaPerf),
+      feError: toFeErrorStats(payload.feError),
     })
   } catch (error) {
     return fail(normalizeError(error))
   }
 }
 
-export async function adminDeleteChat(chatId: string): Promise<AdminApiResult<void>> {
+export async function getAdminOperationLogs(
+  query: AdminOperationLogQuery = {},
+): Promise<AdminApiResult<AdminPagedData<AdminOperationLogItem>>> {
   try {
     assertSupabaseConfigured()
 
-    if (!chatId) {
-      return fail('chatId 不能为空')
+    const { from, to } = resolvePage(query)
+
+    let builder = supabase
+      .from('admin_operation_logs')
+      .select('id, actor_user_id, actor_email, action, target_type, target_id, target_label, status, details, created_at', {
+        count: 'exact',
+      })
+
+    if (query.action) {
+      builder = builder.eq('action', query.action)
     }
 
-    // First delete all messages in the chat
-    const { error: messagesError } = await supabase
-      .from(CHAT_MESSAGE_TABLE)
-      .delete()
-      .eq('chat_id', chatId)
-
-    if (messagesError) {
-      return fail(messagesError.message)
+    if (query.targetType) {
+      builder = builder.eq('target_type', query.targetType)
     }
 
-    // Then delete the chat itself
-    const { error: chatError } = await supabase
-      .from(CHAT_TABLE)
-      .delete()
-      .eq('id', chatId)
-
-    if (chatError) {
-      return fail(chatError.message)
+    if (query.status) {
+      builder = builder.eq('status', query.status)
     }
 
-    return ok()
+    // PostgREST 的 or() 语法用逗号和括号做分隔，关键字里先去掉
+    const keyword = query.search?.trim().replace(/[,()]/g, '')
+    if (keyword) {
+      const pattern = `%${escapeIlike(keyword)}%`
+      builder = builder.or(
+        `actor_email.ilike.${pattern},target_label.ilike.${pattern},target_id.ilike.${pattern},action.ilike.${pattern}`,
+      )
+    }
+
+    const { data, error, count } = await builder
+      .order('created_at', { ascending: false })
+      .range(from, to)
+      .returns<AdminOperationLogRow[]>()
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    const items = (data ?? []).map(toOperationLogItem)
+
+    return ok({ items, total: count ?? items.length })
   } catch (error) {
     return fail(normalizeError(error))
   }
 }
 
-export async function adminDeleteChatMessage(messageId: string): Promise<AdminApiResult<void>> {
+export async function getAdminOperationLogStats(): Promise<AdminApiResult<AdminOperationLogStats>> {
   try {
     assertSupabaseConfigured()
 
-    if (!messageId) {
-      return fail('messageId 不能为空')
+    const [total, success, failure] = await Promise.all([
+      countRows('admin_operation_logs'),
+      countRows('admin_operation_logs', { status: 'success' }),
+      countRows('admin_operation_logs', { status: 'failure' }),
+    ])
+
+    return ok({ total, success, failure })
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminDeleteDocument(documentId: string): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!documentId) {
+      return fail('documentId 不能为空')
     }
 
-    const { error } = await supabase
-      .from(CHAT_MESSAGE_TABLE)
-      .delete()
-      .eq('id', messageId)
+    const { error } = await supabase.rpc('admin_delete_document', {
+      p_document_id: documentId,
+    })
 
     if (error) {
       return fail(error.message)
@@ -703,3 +919,140 @@ export async function adminDeleteChatMessage(messageId: string): Promise<AdminAp
     return fail(normalizeError(error))
   }
 }
+
+export async function adminSetDocumentShared(documentId: string, isShared: boolean): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!documentId) {
+      return fail('documentId 不能为空')
+    }
+
+    const { error } = await supabase.rpc('admin_set_document_shared', {
+      p_document_id: documentId,
+      p_is_shared: isShared,
+    })
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminDeleteKnowledgeFile(fileId: string): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!fileId) {
+      return fail('fileId 不能为空')
+    }
+
+    const { error } = await supabase.rpc('admin_delete_knowledge_file', {
+      p_file_id: fileId,
+    })
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminCreateUser(input: AdminCreateUserInput): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    const payload = await invokeEdgeFunction<Record<string, unknown>>('admin-user-role', {
+      action: 'create-user',
+      email: input.email,
+      password: input.password,
+      fullName: input.fullName,
+      role: input.role,
+    })
+
+    if (payload?.success !== true) {
+      return fail('添加用户失败')
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminSetUserBan(input: AdminSetUserBanInput): Promise<AdminApiResult<void>> {  try {
+    assertSupabaseConfigured()
+
+    if (!input.userId) {
+      return fail('userId 不能为空')
+    }
+
+    const payload = await invokeEdgeFunction<Record<string, unknown>>('admin-user-role', {
+      action: 'set-ban',
+      userId: input.userId,
+      banned: input.banned,
+    })
+
+    if (payload?.success !== true) {
+      return fail(input.banned ? '封禁失败' : '解封失败')
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminDeleteUser(userId: string): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!userId) {
+      return fail('userId 不能为空')
+    }
+
+    const payload = await invokeEdgeFunction<Record<string, unknown>>('admin-user-role', {
+      action: 'delete-user',
+      userId,
+    })
+
+    if (payload?.success !== true) {
+      return fail('删除用户失败')
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function adminUpdateUserRole(input: AdminUpdateUserRoleInput): Promise<AdminApiResult<void>> {
+  try {
+    assertSupabaseConfigured()
+
+    if (!input.userId) {
+      return fail('userId 不能为空')
+    }
+
+    const payload = await invokeEdgeFunction<Record<string, unknown>>('admin-user-role', {
+      userId: input.userId,
+      role: input.role,
+    })
+
+    if (payload?.success !== true) {
+      return fail('角色更新失败')
+    }
+
+    return ok()
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+

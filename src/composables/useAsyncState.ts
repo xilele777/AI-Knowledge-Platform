@@ -20,7 +20,9 @@ export interface AsyncState<T> {
 export interface UseAsyncStateOptions<T = unknown> {
   /** 初始数据 */
   initialData?: T | null
-  /** 骨架屏/loading 最短展示时间(ms)，防止接口过快导致闪烁。默认 200ms */
+  /** 骨架屏/loading 延迟出现时间(ms)，默认 120ms；在此之前返回则不显示骨架 */
+  delayLoadingMs?: number
+  /** 骨架屏一旦出现后的最短展示时间(ms)，默认 80ms */
   minLoadingMs?: number
 }
 
@@ -35,6 +37,8 @@ export interface UseAsyncStateReturn<T> {
   error: Ref<string | null>
   /** 是否正在加载（含 streaming） */
   isLoading: ComputedRef<boolean>
+  /** 是否展示骨架屏（延迟出现 + 最短存在） */
+  showSkeleton: Ref<boolean>
   /** 执行异步操作，自动管理状态转换 */
   execute: (fn: () => Promise<T>, opts?: { streaming?: boolean }) => Promise<T | null>
   /** 直接设置流式数据（不改变 status） */
@@ -63,11 +67,14 @@ export interface UseAsyncStateReturn<T> {
 export function useAsyncState<T = unknown>(
   options: UseAsyncStateOptions<T> = {},
 ): UseAsyncStateReturn<T> {
-  const { initialData = null, minLoadingMs = 200 } = options
+  const { initialData = null, delayLoadingMs = 120, minLoadingMs = 80 } = options
 
   const status = ref<AsyncStatus>('idle')
   const data = ref<T | null>(initialData) as Ref<T | null>
   const error = ref<string | null>(null)
+  const showSkeleton = ref(false)
+  let loadingDelayTimer: ReturnType<typeof setTimeout> | null = null
+  let skeletonShownAt = 0
 
   const state = computed<AsyncState<T>>(() => ({
     status: status.value,
@@ -77,37 +84,74 @@ export function useAsyncState<T = unknown>(
 
   const isLoading = computed(() => status.value === 'loading' || status.value === 'streaming')
 
+  function clearLoadingDelayTimer() {
+    if (loadingDelayTimer) {
+      clearTimeout(loadingDelayTimer)
+      loadingDelayTimer = null
+    }
+  }
+
+  function beginLoadingVisual(streaming = false) {
+    clearLoadingDelayTimer()
+    showSkeleton.value = false
+    skeletonShownAt = 0
+
+    if (streaming) {
+      return
+    }
+
+    if (delayLoadingMs <= 0) {
+      showSkeleton.value = true
+      skeletonShownAt = Date.now()
+      return
+    }
+
+    loadingDelayTimer = setTimeout(() => {
+      showSkeleton.value = true
+      skeletonShownAt = Date.now()
+      loadingDelayTimer = null
+    }, delayLoadingMs)
+  }
+
+  async function finishLoadingVisual(streaming = false) {
+    clearLoadingDelayTimer()
+
+    if (streaming || !showSkeleton.value) {
+      showSkeleton.value = false
+      skeletonShownAt = 0
+      return
+    }
+
+    const elapsed = Date.now() - skeletonShownAt
+    if (elapsed < minLoadingMs) {
+      await new Promise((resolve) => setTimeout(resolve, minLoadingMs - elapsed))
+    }
+
+    showSkeleton.value = false
+    skeletonShownAt = 0
+  }
+
   async function execute(
     fn: () => Promise<T>,
     opts?: { streaming?: boolean },
   ): Promise<T | null> {
-    const startTime = Date.now()
-
     if (opts?.streaming) {
       status.value = 'streaming'
     } else {
       status.value = 'loading'
     }
     error.value = null
+    beginLoadingVisual(Boolean(opts?.streaming))
 
     try {
       const result = await fn()
-
-      // 骨架屏最小展示时间：防止接口过快导致闪烁
-      const elapsed = Date.now() - startTime
-      if (!opts?.streaming && elapsed < minLoadingMs) {
-        await new Promise((resolve) => setTimeout(resolve, minLoadingMs - elapsed))
-      }
+      await finishLoadingVisual(Boolean(opts?.streaming))
 
       status.value = 'success'
       data.value = result
       return result
     } catch (err) {
-      // 即使失败也保证最小展示时间
-      const elapsed = Date.now() - startTime
-      if (!opts?.streaming && elapsed < minLoadingMs) {
-        await new Promise((resolve) => setTimeout(resolve, minLoadingMs - elapsed))
-      }
+      await finishLoadingVisual(Boolean(opts?.streaming))
 
       status.value = 'error'
       error.value = err instanceof Error ? err.message : '未知错误'
@@ -120,9 +164,12 @@ export function useAsyncState<T = unknown>(
   }
 
   function reset() {
+    clearLoadingDelayTimer()
     status.value = 'idle'
     data.value = initialData as T | null
     error.value = null
+    showSkeleton.value = false
+    skeletonShownAt = 0
   }
 
   return {
@@ -131,6 +178,7 @@ export function useAsyncState<T = unknown>(
     data,
     error,
     isLoading,
+    showSkeleton,
     execute,
     setStreamingData,
     reset,

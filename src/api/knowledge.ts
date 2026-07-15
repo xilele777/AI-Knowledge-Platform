@@ -1,4 +1,6 @@
 import { getCurrentUser } from './auth'
+import pinia from '../stores'
+import { useUserStore } from '../stores/user'
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
 import { createBatchEmbeddings } from '../utils/vectorEmbedding'
 import type { AiResolvedConfig } from '../utils/aiConfig'
@@ -65,7 +67,6 @@ type KnowledgeDocumentRow = {
 type DocumentTitleRow = {
   id: string
   title: string
-  status: string
 }
 
 const KNOWLEDGE_BASE_TABLE = 'knowledge_bases'
@@ -210,7 +211,6 @@ function toKnowledgeDocumentSource(
     knowledgeBaseId: row.knowledge_base_id,
     documentId: row.document_id,
     title: doc?.title || row.title_snapshot || '未命名文档',
-    documentStatus: doc?.status ?? null,
     chunkCount: row.last_chunk_count,
     lastSyncedAt: row.last_synced_at,
     createdAt: row.created_at,
@@ -260,6 +260,13 @@ function toPgvectorLiteral(value: number[] | null | undefined): string | null {
 }
 
 async function requireUserId(): Promise<string> {
+  const userStore = useUserStore(pinia)
+  const storeUserId = userStore.user?.id
+
+  if (storeUserId) {
+    return storeUserId
+  }
+
   const user = await getCurrentUser()
 
   if (!user) {
@@ -347,7 +354,7 @@ export async function getMyKnowledgeBases(): Promise<ApiResult<KnowledgeBaseList
 
     const { data, error } = await supabase
       .from(KNOWLEDGE_BASE_TABLE)
-      .select('*')
+      .select('id, name, description, status, qa_config, created_at, updated_at')
       .eq('owner_id', userId)
       .order('updated_at', { ascending: false })
       .returns<KnowledgeBaseRow[]>()
@@ -672,7 +679,7 @@ export async function getKnowledgeDocumentSources(
     const documentIds = Array.from(new Set(rows.map((item) => item.document_id)))
     const { data: docsData, error: docsError } = await supabase
       .from('documents')
-      .select('id, title, status')
+      .select('id, title')
       .eq('owner_id', userId)
       .in('id', documentIds)
       .returns<DocumentTitleRow[]>()

@@ -1,6 +1,6 @@
 import { assertSupabaseConfigured, supabase, supabaseUrl } from './supabase'
 
-export type EdgeFunctionName = 'ai-chat' | 'ai-embeddings' | 'admin-analytics'
+export type EdgeFunctionName = 'ai-chat' | 'ai-embeddings' | 'admin-analytics' | 'admin-user-role'
 
 export interface InvokeEdgeFunctionOptions {
   signal?: AbortSignal

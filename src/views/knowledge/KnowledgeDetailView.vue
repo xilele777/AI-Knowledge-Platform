@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
+import { useListCacheStore } from '@/stores/listCache'
 import {
   deleteKnowledgeBase,
   deleteKnowledgeFile,
@@ -10,15 +11,38 @@ import {
   getKnowledgeFiles,
   removeDocumentFromKnowledgeBase,
 } from '../../api/knowledge'
-import type { KnowledgeBase, KnowledgeDocumentSource, KnowledgeFileListItem } from '../../types/knowledge'
+import type {
+  KnowledgeBase,
+  KnowledgeBaseListItem,
+  KnowledgeDocumentSource,
+  KnowledgeFileListItem,
+} from '../../types/knowledge'
 import KnowledgeFileList from './components/KnowledgeFileList.vue'
 import KnowledgeDocumentSourceList from './components/KnowledgeDocumentSourceList.vue'
 import FileUpload from '../../components/knowledge/FileUpload.vue'
 import PageContainer from '../../components/shared/PageContainer.vue'
 import { ArrowLeft } from '@element-plus/icons-vue'
 
+type KnowledgeBaseDisplay = Pick<
+  KnowledgeBase,
+  'id' | 'name' | 'description' | 'status' | 'qaConfig' | 'createdAt' | 'updatedAt'
+>
+
+function toKnowledgeBaseDisplay(item: KnowledgeBase | KnowledgeBaseListItem): KnowledgeBaseDisplay {
+  return {
+    id: item.id,
+    name: item.name,
+    description: item.description,
+    status: item.status,
+    qaConfig: item.qaConfig,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  }
+}
+
 const route = useRoute()
 const router = useRouter()
+const listCacheStore = useListCacheStore()
 
 const loading = ref(false)
 const deleting = ref(false)
@@ -26,7 +50,7 @@ const filesLoading = ref(false)
 const documentSourcesLoading = ref(false)
 const errorMessage = ref('')
 
-const knowledgeBase = ref<KnowledgeBase | null>(null)
+const knowledgeBase = ref<KnowledgeBaseDisplay | null>(null)
 const files = ref<KnowledgeFileListItem[]>([])
 const documentSources = ref<KnowledgeDocumentSource[]>([])
 let statusPollTimer: number | null = null
@@ -36,23 +60,37 @@ const knowledgeBaseId = computed(() => {
   return typeof id === 'string' ? id : ''
 })
 
-const statusTagType = computed(() => {
-  return knowledgeBase.value?.status === 'active' ? 'success' : 'info'
-})
-
 function formatDate(dateText: string): string {
   const date = new Date(dateText)
   if (Number.isNaN(date.getTime())) {
     return '-'
   }
 
-  return date.toLocaleString('zh-CN')
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 async function loadKnowledgeBaseDetail() {
   if (!knowledgeBaseId.value) {
     errorMessage.value = '知识库 ID 无效'
     return
+  }
+
+  const cachedList = listCacheStore.getData(listCacheStore.knowledgeBases)
+  const cachedItem = cachedList?.find((item: KnowledgeBaseListItem) => item.id === knowledgeBaseId.value)
+  if (cachedItem) {
+    errorMessage.value = ''
+    knowledgeBase.value = toKnowledgeBaseDisplay(cachedItem)
+
+    if (listCacheStore.isFresh(listCacheStore.knowledgeBases)) {
+      return
+    }
   }
 
   loading.value = true
@@ -67,7 +105,18 @@ async function loadKnowledgeBaseDetail() {
       return
     }
 
-    knowledgeBase.value = result.data
+    knowledgeBase.value = toKnowledgeBaseDisplay(result.data)
+    if (cachedItem) {
+      listCacheStore.patchKnowledgeBase({
+        id: result.data.id,
+        name: result.data.name,
+        description: result.data.description,
+        status: result.data.status,
+        qaConfig: result.data.qaConfig,
+        createdAt: result.data.createdAt,
+        updatedAt: result.data.updatedAt,
+      })
+    }
   } catch (error) {
     knowledgeBase.value = null
     errorMessage.value = error instanceof Error ? error.message : '获取知识库详情失败'
@@ -223,6 +272,7 @@ async function handleDeleteKnowledgeBase() {
     }
 
     ElMessage.success('删除成功')
+    listCacheStore.removeKnowledgeBase(knowledgeBaseId.value)
     router.push('/knowledge')
   } finally {
     deleting.value = false
@@ -262,27 +312,26 @@ void loadPageData()
 
 <template>
   <PageContainer width="default">
-    <template v-if="knowledgeBase" #actions>
-      <el-button type="danger" text :loading="deleting" @click="handleDeleteKnowledgeBase">删除知识库</el-button>
-      <el-button @click="loadPageData">刷新</el-button>
-      <el-button type="primary" @click="goChat">进入问答页</el-button>
-    </template>
-
-    <div class="detail-head">
-      <el-button text :icon="ArrowLeft" class="back-btn" @click="goList">知识库列表</el-button>
-      <h1 class="detail-title" v-loading="loading">
-        {{ knowledgeBase?.name || '知识库详情' }}
-        <el-tag v-if="knowledgeBase" :type="statusTagType" size="small" effect="plain" class="title-tag">
-          {{ knowledgeBase.status }}
-        </el-tag>
-      </h1>
-      <p v-if="knowledgeBase" class="detail-desc">
-        {{ knowledgeBase.description || '暂无描述' }}
-      </p>
-      <div v-if="knowledgeBase" class="detail-meta">
+    <div class="detail-hero" v-loading="loading">
+      <div class="hero-row">
+        <div class="hero-title-wrap">
+          <el-button text circle :icon="ArrowLeft" class="back-btn" title="返回知识库列表" @click="goList" />
+          <h1 class="detail-title">{{ knowledgeBase?.name || '知识库详情' }}</h1>
+        </div>
+        <div v-if="knowledgeBase" class="hero-actions">
+          <el-button @click="loadPageData">刷新</el-button>
+          <el-button type="primary" @click="goChat">进入问答页</el-button>
+          <el-button type="danger" text :loading="deleting" @click="handleDeleteKnowledgeBase">
+            删除知识库
+          </el-button>
+        </div>
+      </div>
+      <div v-if="knowledgeBase" class="hero-meta">
+        <span v-if="knowledgeBase.description">{{ knowledgeBase.description }}</span>
         <span>创建于 {{ formatDate(knowledgeBase.createdAt) }}</span>
-        <span class="meta-dot">·</span>
         <span>更新于 {{ formatDate(knowledgeBase.updatedAt) }}</span>
+        <span>文件 {{ files.length }}</span>
+        <span>来源文档 {{ documentSources.length }}</span>
       </div>
     </div>
 
@@ -297,13 +346,27 @@ void loadPageData()
 
     <div class="detail-grid">
       <div class="detail-main">
+        <section class="panel upload-panel">
+          <div class="section-header">
+            <h3 class="panel-title">上传文件</h3>
+            <span class="section-meta">支持 txt / md，单个不超过 5MB</span>
+          </div>
+          <FileUpload :knowledge-base-id="knowledgeBaseId" @uploaded="handleUploaded" />
+        </section>
+
         <section class="panel">
-          <h3 class="panel-title">文件列表</h3>
+          <div class="section-header">
+            <h3 class="panel-title">文件列表</h3>
+            <span class="section-meta">共 {{ files.length }} 个文件</span>
+          </div>
           <KnowledgeFileList :loading="filesLoading" :files="files" @remove="handleDeleteFile" />
         </section>
 
         <section class="panel">
-          <h3 class="panel-title">站内文档来源</h3>
+          <div class="section-header">
+            <h3 class="panel-title">站内文档来源</h3>
+            <span class="section-meta">共 {{ documentSources.length }} 篇文档</span>
+          </div>
           <KnowledgeDocumentSourceList
             :loading="documentSourcesLoading"
             :items="documentSources"
@@ -311,58 +374,76 @@ void loadPageData()
           />
         </section>
       </div>
-
-      <aside class="detail-side">
-        <section class="panel">
-          <h3 class="panel-title">上传文件</h3>
-          <FileUpload :knowledge-base-id="knowledgeBaseId" @uploaded="handleUploaded" />
-        </section>
-      </aside>
     </div>
   </PageContainer>
 </template>
 
 <style scoped>
-.detail-head {
-  margin-bottom: 24px;
+.detail-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 16px 24px 18px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-large);
+  background: linear-gradient(
+    135deg,
+    var(--md-sys-color-surface-container-lowest),
+    var(--md-sys-color-surface-container-low)
+  );
+}
+
+.hero-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.hero-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .back-btn {
-  margin: 0 0 8px -8px;
+  margin-left: -8px;
+  flex-shrink: 0;
 }
 
 .detail-title {
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.3px;
   color: var(--md-sys-color-on-background);
-  line-height: 1.25;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.title-tag {
+.hero-actions {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
 }
 
-.detail-desc {
-  margin: 8px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-medium);
-}
-
-.detail-meta {
-  margin-top: 8px;
+.hero-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  row-gap: 4px;
   font-size: var(--md-sys-typescale-body-small);
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.meta-dot {
+.hero-meta span + span::before {
+  content: '·';
+  margin: 0 8px;
   color: var(--md-sys-color-outline-variant);
 }
 
@@ -372,7 +453,7 @@ void loadPageData()
 
 .detail-grid {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
@@ -384,19 +465,39 @@ void loadPageData()
   min-width: 0;
 }
 
-.detail-side {
-  position: sticky;
-  top: 0;
+.upload-panel {
+  overflow: hidden;
 }
 
-@media (max-width: 900px) {
-  .detail-grid {
-    grid-template-columns: 1fr;
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.section-header .panel-title {
+  margin-bottom: 0;
+}
+
+.section-meta {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium);
+}
+
+@media (max-width: 640px) {
+  .detail-hero {
+    padding: 14px 16px 16px;
   }
 
-  .detail-side {
-    position: static;
-    order: -1;
+  .hero-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-actions {
+    justify-content: flex-end;
   }
 }
 </style>

@@ -2,105 +2,125 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
-import { getMyDocuments } from '@/api/documents'
-import type { DocumentListItem } from '@/types/document'
+import { getDashboardStats } from '@/api/documents'
+import { getMyKnowledgeBases } from '@/api/knowledge'
+import type { DashboardStats, DashboardRecentDoc } from '@/types/document'
 import { useAsyncState } from '@/composables/useAsyncState'
 import { useNumberTween } from '@/composables/useNumberTween'
 import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
+import { useUserStore } from '@/stores/user'
 import PageContainer from '@/components/shared/PageContainer.vue'
 import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import SvgIcon from '@/components/shared/SvgIcon.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
 const RefreshIcon = Refresh
 
 // ─── 数据获取 ───
-const docsState = useAsyncState<DocumentListItem[]>({ initialData: [] })
+const dashboardState = useAsyncState<DashboardStats>({
+  initialData: {
+    totalCharacters: 0,
+    totalDocs: 0,
+    knowledgeBaseCount: 0,
+    last7Days: [],
+    recent: [],
+  },
+})
 
-const loadAll = async () => {
-  await docsState.execute(() =>
-    getMyDocuments({ limit: 1000 }).then((r) =>
-      r.success ? (r.data ?? []) : Promise.reject(new Error(r.error!)),
-    ),
-  )
+const loadDashboard = async () => {
+  await dashboardState.execute(async () => {
+    const [statsResult, knowledgeBaseResult] = await Promise.all([
+      getDashboardStats(),
+      getMyKnowledgeBases(),
+    ])
+
+    if (!statsResult.success || !statsResult.data) {
+      throw new Error(statsResult.error || '获取工作台统计失败')
+    }
+
+    const knowledgeBaseCount = knowledgeBaseResult.success ? (knowledgeBaseResult.data?.length ?? 0) : statsResult.data.knowledgeBaseCount
+
+    return {
+      ...statsResult.data,
+      knowledgeBaseCount,
+    }
+  })
 }
 
-void loadAll()
+void loadDashboard()
+
+const stats = computed(() => dashboardState.data.value ?? {
+  totalCharacters: 0,
+  totalDocs: 0,
+  knowledgeBaseCount: 0,
+  last7Days: [],
+  recent: [],
+})
+
+const registeredDays = computed(() => {
+  const createdAt = userStore.user?.created_at
+  if (!createdAt) return 0
+
+  const created = new Date(createdAt)
+  if (Number.isNaN(created.getTime())) return 0
+
+  const diffMs = Date.now() - created.getTime()
+  return Math.max(1, Math.floor(diffMs / 86400000) + 1)
+})
 
 // ─── 统计卡片数据 ───
 const statCards = computed(() => [
   {
     label: '总字数',
     icon: 'document' as const,
-    value: totalCharacters.value,
+    value: stats.value.totalCharacters,
     color: 'var(--md-sys-color-primary)',
     bgClass: 'stat-card-primary',
   },
   {
     label: '文档总数',
     icon: 'dashboard' as const,
-    value: documents.value.length,
+    value: stats.value.totalDocs,
     color: 'var(--accent-emerald)',
     bgClass: 'stat-card-success',
   },
   {
-    label: '草稿',
-    icon: 'plus' as const,
-    value: draftCount.value,
+    label: '知识库数量',
+    icon: 'knowledge' as const,
+    value: stats.value.knowledgeBaseCount,
     color: 'var(--accent-violet)',
     bgClass: 'stat-card-violet',
   },
   {
-    label: '已发布',
-    icon: 'share' as const,
-    value: publishedCount.value,
+    label: '已注册天数',
+    icon: 'user' as const,
+    value: registeredDays.value,
     color: 'var(--accent-amber)',
     bgClass: 'stat-card-amber',
   },
 ])
 
 // ─── 最近文档 ───
-const documents = computed(() => docsState.data.value ?? [])
-const recentDocs = computed(() => documents.value.slice(0, 6))
-const totalCharacters = computed(() =>
-  documents.value.reduce((total, doc) => total + doc.characterCount, 0),
-)
-const draftCount = computed(() => documents.value.filter((doc) => doc.status === 'draft').length)
-const publishedCount = computed(() =>
-  documents.value.filter((doc) => doc.status === 'published').length,
-)
+const recentDocs = computed<DashboardRecentDoc[]>(() => stats.value.recent)
 const averageCharacters = computed(() =>
-  documents.value.length ? Math.round(totalCharacters.value / documents.value.length) : 0,
+  stats.value.totalDocs ? Math.round(stats.value.totalCharacters / stats.value.totalDocs) : 0,
 )
-
-function dateKey(date: Date): string {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
-}
-
-const todayEditedCount = computed(() => {
-  const today = dateKey(new Date())
-  return documents.value.filter((doc) => dateKey(new Date(doc.updatedAt)) === today).length
-})
 
 const activityDays = computed(() => {
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date()
-    date.setHours(0, 0, 0, 0)
-    date.setDate(date.getDate() - (6 - index))
-    const key = dateKey(date)
-    const count = documents.value.filter((doc) => dateKey(new Date(doc.updatedAt)) === key).length
-
-    return {
-      key,
-      label: date.toLocaleDateString('zh-CN', { weekday: 'short' }).replace('周', ''),
-      count,
-    }
-  })
+  const days = stats.value.last7Days.map((day) => ({
+    key: day.date,
+    label: new Date(`${day.date}T00:00:00+08:00`)
+      .toLocaleDateString('zh-CN', { weekday: 'short' })
+      .replace('周', ''),
+    count: day.count,
+  }))
   const max = Math.max(...days.map((day) => day.count), 1)
   return days.map((day) => ({ ...day, height: Math.max((day.count / max) * 100, day.count ? 12 : 3) }))
 })
 
+const todayEditedCount = computed(() => activityDays.value[activityDays.value.length - 1]?.count ?? 0)
 const activeDaysCount = computed(() => activityDays.value.filter((day) => day.count > 0).length)
 
 // ─── 数字滚动动画 ───
@@ -112,7 +132,8 @@ const tweens = tweenTargets.value.map((_, index) =>
   ),
 )
 
-const isLoading = computed(() => docsState.isLoading.value)
+const isLoading = computed(() => dashboardState.isLoading.value)
+const showSkeleton = computed(() => dashboardState.showSkeleton.value)
 
 function formatNumber(value: number): string {
   return value.toLocaleString('zh-CN')
@@ -135,12 +156,6 @@ function formatTime(dateStr: string): string {
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-function statusText(status: string): string {
-  if (status === 'published') return '已发布'
-  if (status === 'archived') return '已归档'
-  return '草稿'
-}
-
 function openDocument(id: string) {
   void router.push({ name: 'DocDetail', params: { id } })
 }
@@ -159,11 +174,11 @@ useKeyboardShortcut({
     description="AI 知识库平台指挥中心"
   >
     <template #actions>
-      <el-button @click="loadAll" :loading="isLoading" :icon="RefreshIcon">刷新</el-button>
+      <el-button @click="loadDashboard" :loading="isLoading" :icon="RefreshIcon">刷新</el-button>
     </template>
 
     <!-- 骨架屏 -->
-    <template v-if="isLoading">
+    <template v-if="showSkeleton">
       <SkeletonCard :count="4" variant="card" />
     </template>
 
@@ -224,9 +239,6 @@ useKeyboardShortcut({
               <span class="recent-item-meta">
                 <span>{{ formatNumber(doc.characterCount) }} 字</span>
                 {{ formatTime(doc.updatedAt) }}
-                <el-tag size="small" :type="doc.status === 'published' ? 'success' : 'info'">
-                  {{ statusText(doc.status) }}
-                </el-tag>
               </span>
             </div>
           </button>
