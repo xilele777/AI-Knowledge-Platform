@@ -17,5 +17,6 @@ const extraActions = [
     app-title="管理后台"
     :menu-groups="adminMenuGroups"
     :extra-actions="extraActions"
+    home-path="/admin"
   />
 </template>

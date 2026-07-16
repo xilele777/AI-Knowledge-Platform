@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import 'md-editor-v3/lib/style.css'
+import type { ToolbarNames } from 'md-editor-v3'
 const MdEditor = defineAsyncComponent(() =>
   import('md-editor-v3').then((m) => m.MdEditor),
 )
@@ -19,13 +20,49 @@ import { clearDocumentDraft, readDocumentDraft, writeDocumentDraft } from '../..
 import { ANALYTICS_EVENTS } from '../../constants/analyticsEvents'
 import { track } from '../../utils/tracker'
 import { useAiConfigStore } from '../../stores/aiConfig'
+import { useListCacheStore } from '@/stores/listCache'
 import type { KnowledgeBaseListItem } from '../../types/knowledge'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
+// 相比 md-editor-v3 默认全量工具栏，仅去掉 github 跳转和手动保存（页面 800ms 自动保存）
+const editorToolbars: ToolbarNames[] = [
+  'bold',
+  'underline',
+  'italic',
+  'strikeThrough',
+  'sub',
+  'sup',
+  '-',
+  'title',
+  'quote',
+  'unorderedList',
+  'orderedList',
+  'task',
+  '-',
+  'codeRow',
+  'code',
+  'link',
+  'image',
+  'table',
+  'mermaid',
+  'katex',
+  '-',
+  'revoke',
+  'next',
+  '=',
+  'pageFullscreen',
+  'fullscreen',
+  'preview',
+  'previewOnly',
+  'htmlPreview',
+  'catalog',
+]
+
 const route = useRoute()
 const router = useRouter()
 const aiConfigStore = useAiConfigStore()
+const listCacheStore = useListCacheStore()
 const docId = computed(() => String(route.params.id || ''))
 
 const pageLoading = ref(false)
@@ -72,7 +109,7 @@ function maybeRestoreLocalDraft(serverTitle: string, serverContent: string): boo
 
 const saveStatusText = computed(() => {
   if (saveStatus.value === 'saving') {
-    return '保存中...'
+    return '保存中…'
   }
 
   if (saveStatus.value === 'saved') {
@@ -80,26 +117,10 @@ const saveStatusText = computed(() => {
   }
 
   if (saveStatus.value === 'error') {
-    return '保存失败'
+    return saveErrorMessage.value || '保存失败'
   }
 
-  return '未修改'
-})
-
-const saveStatusType = computed(() => {
-  if (saveStatus.value === 'saving') {
-    return 'warning'
-  }
-
-  if (saveStatus.value === 'saved') {
-    return 'success'
-  }
-
-  if (saveStatus.value === 'error') {
-    return 'danger'
-  }
-
-  return 'info'
+  return '编辑中'
 })
 
 async function loadDocument() {
@@ -205,7 +226,6 @@ async function doSave() {
     document_id: docId.value,
     title: form.title,
     content_length: form.content.length,
-    status: result.data?.status ?? 'unknown',
   })
 }
 
@@ -284,6 +304,16 @@ async function ensureKnowledgeBasesLoaded() {
     return
   }
 
+  const cached = listCacheStore.getData(listCacheStore.knowledgeBases)
+  if (cached?.length) {
+    knowledgeBases.value = cached
+    selectedKnowledgeBaseId.value = cached[0]?.id || ''
+
+    if (listCacheStore.isFresh(listCacheStore.knowledgeBases)) {
+      return
+    }
+  }
+
   knowledgeLoading.value = true
 
   try {
@@ -293,6 +323,7 @@ async function ensureKnowledgeBasesLoaded() {
     }
 
     knowledgeBases.value = result.data || []
+    listCacheStore.setKnowledgeBases(knowledgeBases.value)
     selectedKnowledgeBaseId.value = knowledgeBases.value[0]?.id || ''
   } finally {
     knowledgeLoading.value = false
@@ -381,13 +412,20 @@ void loadDocument()
         />
       </div>
       <div class="topbar-right">
-        <el-tag :type="saveStatusType" size="small" effect="plain">{{ saveStatusText }}</el-tag>
-        <el-tag v-if="isShared" type="success" size="small" effect="plain">共享中</el-tag>
-        <el-button type="primary" plain @click="handleOpenJoinDialog">加入知识库</el-button>
-        <el-button :type="isShared ? 'info' : 'success'" plain :loading="sharing" @click="handleToggleShare">
+        <span
+          class="save-status"
+          :class="{
+            'save-status--error': saveStatus === 'error',
+            'save-status--saved': saveStatus === 'saved',
+          }"
+        >
+          {{ saveStatusText }}
+        </span>
+        <el-button @click="handleOpenJoinDialog">加入知识库</el-button>
+        <el-button :loading="sharing" @click="handleToggleShare">
           {{ isShared ? '取消共享' : '共享' }}
         </el-button>
-        <el-button @click="showAssistant = true">AI 助手</el-button>
+        <el-button type="primary" plain @click="showAssistant = true">AI 助手</el-button>
         <el-button type="danger" text :loading="deleting" @click="handleDelete">删除</el-button>
       </div>
     </div>
@@ -403,7 +441,13 @@ void loadDocument()
 
     <div v-else class="editor-layout">
       <div class="md-editor-wrapper">
-        <MdEditor v-model="form.content" language="zh-CN" :preview="false" :auto-detect-code="true" />
+        <MdEditor
+          v-model="form.content"
+          language="zh-CN"
+          :preview="false"
+          :auto-detect-code="true"
+          :toolbars="editorToolbars"
+        />
       </div>
     </div>
 
@@ -432,7 +476,7 @@ void loadDocument()
         </el-form-item>
 
         <el-alert
-          title="加入后将读取当前文档内容并重新切片写入 knowledge_chunks，后续问答可检索到这些片段。"
+          title="加入后会自动切片并建立索引，知识库问答即可引用本文档内容。"
           type="info"
           :closable="false"
           show-icon
@@ -471,16 +515,17 @@ void loadDocument()
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 56px;
+  min-height: 56px;
   padding: 0 20px;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
   flex-shrink: 0;
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   flex: 1;
   min-width: 0;
 }
@@ -488,13 +533,24 @@ void loadDocument()
 .title-input {
   flex: 1;
   min-width: 0;
-  max-width: 480px;
+  max-width: 640px;
+}
+
+.title-input :deep(.el-input__wrapper),
+.title-input :deep(.el-input__wrapper:hover),
+.title-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: none;
+  padding: 0 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
 }
 
 .title-input :deep(.el-input__wrapper) {
-  box-shadow: none;
   background: transparent;
-  padding-left: 0;
+}
+
+.title-input :deep(.el-input__wrapper:hover),
+.title-input :deep(.el-input__wrapper.is-focus) {
+  background: var(--md-sys-color-surface-container);
 }
 
 .title-input :deep(.el-input__inner) {
@@ -505,12 +561,34 @@ void loadDocument()
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
+.topbar-right :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.save-status {
+  margin-right: 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.save-status--saved {
+  color: var(--md-sys-color-success);
+}
+
+.save-status--error {
+  color: var(--md-sys-color-error);
+}
+
 .page-alert {
-  margin: 16px 20px;
+  margin: 16px 28px;
   flex-shrink: 0;
 }
 
@@ -519,26 +597,39 @@ void loadDocument()
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 12px 20px 20px;
 }
 
 .md-editor-wrapper {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  border-radius: var(--md-sys-shape-corner-large);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
 }
 
 .md-editor-wrapper :deep(.md-editor) {
   height: 100%;
 }
 
+.md-editor-wrapper :deep(.md-editor-toolbar) {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.md-editor-wrapper :deep(.md-editor-input-wrapper) {
+  padding: 0 8px 8px;
+}
+
 .md-editor-wrapper :deep(.md-editor-preview-wrapper) {
   background: var(--md-sys-color-surface-container-low);
-  padding: 16px 20px;
+  padding: 24px 28px;
 }
 
 /* 编辑器内边距，提升长文阅读质感 */
 .md-editor-wrapper :deep(.md-editor-textarea) {
-  padding: 16px 20px !important;
+  padding: 24px 28px !important;
 }
 
 @media (max-width: 768px) {
@@ -552,6 +643,19 @@ void loadDocument()
   .topbar-right {
     justify-content: space-between;
     flex-wrap: wrap;
+  }
+
+  .page-alert {
+    margin: 16px;
+  }
+
+  .editor-layout {
+    padding: 0 12px 12px;
+  }
+
+  .md-editor-wrapper :deep(.md-editor-preview-wrapper),
+  .md-editor-wrapper :deep(.md-editor-textarea) {
+    padding: 18px 18px !important;
   }
 }
 </style>

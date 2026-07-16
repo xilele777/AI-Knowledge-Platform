@@ -1,4 +1,6 @@
 import { getCurrentUser } from './auth'
+import pinia from '../stores'
+import { useUserStore } from '../stores/user'
 import { batchInsertKnowledgeChunks } from './knowledge'
 import { assertSupabaseConfigured, supabase } from '../utils/supabase'
 import type {
@@ -6,10 +8,12 @@ import type {
   AddDocumentToKnowledgeBaseResult,
   ApiResult,
   CreateDocumentInput,
+  DashboardStats,
   Document,
   DocumentListItem,
   DocumentListQuery,
   DocumentStatus,
+  SharedDocumentSort,
   UpdateDocumentInput,
 } from '../types/document'
 import { chunkText } from '../utils/chunkText'
@@ -17,14 +21,78 @@ import { chunkText } from '../utils/chunkText'
 type DocumentRow = {
   id: string
   owner_id: string
+  owner_name?: string | null
   title: string
   content_md: string
   summary: string | null
   status: DocumentStatus
   is_shared: boolean
   shared_at: string | null
+  character_count: number
   created_at: string
   updated_at: string
+}
+
+type DocumentListRow = {
+  id: string
+  owner_id: string
+  title: string
+  status: DocumentStatus
+  is_shared: boolean
+  shared_at: string | null
+  character_count: number
+  created_at: string
+  updated_at: string
+  owner_name?: string
+  view_count?: number | null
+  recent_view_count?: number | null
+  hot_score?: number | null
+  comprehensive_score?: number | null
+}
+
+type SharedDocumentsRpcRow = {
+  id: string
+  owner_id: string
+  owner_name: string | null
+  title: string
+  status: DocumentStatus
+  is_shared: boolean
+  shared_at: string | null
+  character_count: number
+  created_at: string
+  updated_at: string
+  view_count: number | null
+  recent_view_count: number | null
+  hot_score: number | null
+  comprehensive_score: number | null
+}
+
+type SharedDocumentDetailRpcRow = {
+  id: string
+  owner_id: string
+  owner_name: string | null
+  title: string
+  content_md: string
+  summary: string | null
+  status: DocumentStatus
+  is_shared: boolean
+  shared_at: string | null
+  character_count: number
+  created_at: string
+  updated_at: string
+}
+
+type DashboardStatsRpcRow = {
+  total_characters: number | null
+  total_docs: number | null
+  knowledge_base_count: number | null
+  last7days: Array<{ date: string; count: number }> | null
+  recent: Array<{
+    id: string
+    title: string
+    character_count: number
+    updated_at: string
+  }> | null
 }
 
 const TABLE_NAME = 'documents'
@@ -68,6 +136,7 @@ function toDocument(row: DocumentRow): Document {
   return {
     id: row.id,
     ownerId: row.owner_id,
+    ownerName: row.owner_name?.trim() || undefined,
     title: row.title,
     content: row.content_md,
     summary: row.summary,
@@ -79,22 +148,62 @@ function toDocument(row: DocumentRow): Document {
   }
 }
 
-function toDocumentListItem(row: DocumentRow & { owner_name?: string }): DocumentListItem {
+function toDocumentListItem(row: DocumentListRow): DocumentListItem {
   return {
     id: row.id,
     title: row.title,
-    characterCount: row.content_md.replace(/\s/g, '').length,
+    characterCount: row.character_count,
     status: row.status,
     isShared: row.is_shared,
     sharedAt: row.shared_at,
     ownerId: row.owner_id,
     ownerName: row.owner_name,
+    viewCount: row.view_count ?? 0,
+    recentViewCount: row.recent_view_count ?? 0,
+    hotScore: row.hot_score ?? 0,
+    comprehensiveScore: row.comprehensive_score ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
+function resolveSharedSort(sortBy?: SharedDocumentSort):
+  | 'latest'
+  | 'hottest'
+  | 'comprehensive' {
+  if (sortBy === 'hottest' || sortBy === 'comprehensive') {
+    return sortBy
+  }
+
+  return 'latest'
+}
+
+function toDashboardStats(row: DashboardStatsRpcRow | null): DashboardStats {
+  return {
+    totalCharacters: row?.total_characters ?? 0,
+    totalDocs: row?.total_docs ?? 0,
+    knowledgeBaseCount: row?.knowledge_base_count ?? 0,
+    last7Days: (row?.last7days ?? []).map((item) => ({
+      date: item.date,
+      count: item.count,
+    })),
+    recent: (row?.recent ?? []).map((item) => ({
+      id: item.id,
+      title: item.title,
+      characterCount: item.character_count,
+      updatedAt: item.updated_at,
+    })),
+  }
+}
+
 async function requireUserId(): Promise<string> {
+  const userStore = useUserStore(pinia)
+  const storeUserId = userStore.user?.id
+
+  if (storeUserId) {
+    return storeUserId
+  }
+
   const user = await getCurrentUser()
 
   if (!user) {
@@ -152,7 +261,7 @@ export async function getMyDocuments(
 
     let builder = supabase
       .from(TABLE_NAME)
-      .select('*')
+      .select('id, owner_id, title, status, is_shared, shared_at, character_count, created_at, updated_at')
       .eq('owner_id', userId)
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1)
@@ -161,7 +270,7 @@ export async function getMyDocuments(
       builder = builder.ilike('title', `%${keyword}%`)
     }
 
-    const { data, error } = await builder.returns<DocumentRow[]>()
+    const { data, error } = await builder.returns<DocumentListRow[]>()
 
     if (error) {
       return fail(error.message)
@@ -269,29 +378,26 @@ export async function getSharedDocuments(
 
     const limit = query.limit ?? 50
     const offset = query.offset ?? 0
-    const keyword = query.searchTitle?.trim()
+    const keyword = query.searchTitle?.trim() || null
+    const sortBy = resolveSharedSort(query.sortBy)
 
-    let builder = supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .eq('is_shared', true)
-      .order('updated_at', { ascending: false })
-      .range(offset, offset + limit - 1)
-
-    if (keyword) {
-      builder = builder.ilike('title', `%${keyword}%`)
-    }
-
-    const { data, error } = await builder.returns<DocumentRow[]>()
+    const { data, error } = await supabase.rpc('get_shared_documents', {
+      p_search: keyword,
+      p_limit: limit,
+      p_offset: offset,
+      p_sort: sortBy,
+    })
 
     if (error) {
       return fail(error.message)
     }
 
-    return ok((data || []).map((row) => ({
-      ...toDocumentListItem(row),
-      ownerName: '匿名用户',
-    })))
+    return ok(((data as SharedDocumentsRpcRow[] | null) ?? []).map((row) =>
+      toDocumentListItem({
+        ...row,
+        owner_name: row.owner_name ?? undefined,
+      }),
+    ))
   } catch (error) {
     return fail(normalizeError(error))
   }
@@ -301,18 +407,21 @@ export async function getSharedDocumentById(id: string): Promise<ApiResult<Docum
   try {
     assertSupabaseConfigured()
 
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .eq('id', id)
-      .eq('is_shared', true)
-      .single<DocumentRow>()
+    const { data, error } = await supabase.rpc('get_shared_document_detail', {
+      p_document_id: id,
+    })
 
     if (error) {
       return fail(error.message)
     }
 
-    return ok(toDocument(data))
+    const row = Array.isArray(data) ? data[0] : data
+
+    if (!row) {
+      return fail('文档不存在或未共享')
+    }
+
+    return ok(toDocument(row as SharedDocumentDetailRpcRow))
   } catch (error) {
     return fail(normalizeError(error))
   }
@@ -334,6 +443,23 @@ export async function deleteDocument(id: string): Promise<ApiResult<boolean>> {
     }
 
     return ok(true)
+  } catch (error) {
+    return fail(normalizeError(error))
+  }
+}
+
+export async function getDashboardStats(): Promise<ApiResult<DashboardStats>> {
+  try {
+    assertSupabaseConfigured()
+    await requireUserId()
+
+    const { data, error } = await supabase.rpc('get_dashboard_stats')
+
+    if (error) {
+      return fail(error.message)
+    }
+
+    return ok(toDashboardStats(data as DashboardStatsRpcRow | null))
   } catch (error) {
     return fail(normalizeError(error))
   }

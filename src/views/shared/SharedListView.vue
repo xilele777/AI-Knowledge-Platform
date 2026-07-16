@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Grid, List } from '@element-plus/icons-vue'
 import SharedDocumentCard from './components/SharedDocumentCard.vue'
 import { getSharedDocuments } from '../../api/documents'
-import type { DocumentListItem } from '../../types/document'
+import type { DocumentListItem, SharedDocumentSort } from '../../types/document'
 import PageContainer from '@/components/shared/PageContainer.vue'
 import SearchInput from '@/components/shared/SearchInput.vue'
 import CapsuleTabs from '@/components/shared/CapsuleTabs.vue'
@@ -17,7 +17,7 @@ const loading = ref(false)
 const docs = ref<DocumentListItem[]>([])
 const searchKeyword = ref('')
 const errorMessage = ref('')
-const sortBy = ref<'latest' | 'hottest' | 'comprehensive'>('latest')
+const sortBy = ref<SharedDocumentSort>('latest')
 const viewMode = ref<'grid' | 'list'>('grid')
 
 const sortTabs = [
@@ -26,29 +26,15 @@ const sortTabs = [
   { label: '综合', value: 'comprehensive' },
 ]
 
-const sortedDocs = computed(() => {
-  const list = [...docs.value]
-  switch (sortBy.value) {
-    case 'latest':
-      return list.sort((a, b) => new Date(b.sharedAt || b.updatedAt).getTime() - new Date(a.sharedAt || a.updatedAt).getTime())
-    case 'hottest':
-      return list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    case 'comprehensive':
-    default:
-      return list.sort((a, b) => {
-        const scoreA = new Date(a.sharedAt || a.updatedAt).getTime()
-        const scoreB = new Date(b.sharedAt || b.updatedAt).getTime()
-        return scoreB - scoreA
-      })
-  }
-})
-
 const loadDocuments = async () => {
   loading.value = true
   errorMessage.value = ''
 
   try {
-    const query = searchKeyword.value.trim() ? { searchTitle: searchKeyword.value } : {}
+    const query = {
+      ...(searchKeyword.value.trim() ? { searchTitle: searchKeyword.value } : {}),
+      sortBy: sortBy.value,
+    }
     const result = await getSharedDocuments(query)
 
     if (!result.success) {
@@ -67,6 +53,11 @@ const loadDocuments = async () => {
 }
 
 const handleSearch = () => {
+  void loadDocuments()
+}
+
+const handleSortChange = (value: string) => {
+  sortBy.value = value as SharedDocumentSort
   void loadDocuments()
 }
 
@@ -93,7 +84,7 @@ void loadDocuments()
     </template>
 
     <div class="sort-row">
-      <CapsuleTabs v-model="sortBy" :tabs="sortTabs" color="var(--module-shared)" />
+      <CapsuleTabs v-model="sortBy" :tabs="sortTabs" color="var(--module-shared)" @update:model-value="handleSortChange" />
       <div class="view-toggle">
         <el-button
           circle
@@ -127,7 +118,7 @@ void loadDocuments()
       <SkeletonCard v-if="loading" :count="6" variant="card" />
 
       <EmptyStateActionable
-        v-else-if="sortedDocs.length === 0"
+        v-else-if="docs.length === 0"
         icon="share"
         title="还没有共享文档"
         description="快去创作一篇文档并分享到共享广场吧"
@@ -138,7 +129,7 @@ void loadDocuments()
       <!-- 网格视图 -->
       <div v-else-if="viewMode === 'grid'" class="card-grid">
         <div
-          v-for="(item, index) in sortedDocs"
+          v-for="(item, index) in docs"
           :key="item.id"
           class="card-wrapper"
         >
@@ -154,7 +145,7 @@ void loadDocuments()
       <!-- 列表视图 -->
       <div v-else class="list-view">
         <div
-          v-for="(item, index) in sortedDocs"
+          v-for="(item, index) in docs"
           :key="item.id"
           class="list-row"
           @click="handleOpenDoc(item.id)"
@@ -165,7 +156,7 @@ void loadDocuments()
           </div>
           <div class="list-body">
             <span class="list-title">{{ item.title }}</span>
-            <span class="list-owner">{{ item.ownerName || '匿名用户' }}</span>
+            <span class="list-owner">{{ item.ownerName || '未署名用户' }}</span>
           </div>
           <div class="list-meta">
             <span class="list-time">

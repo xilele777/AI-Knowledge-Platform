@@ -262,11 +262,6 @@ async function handleUploadAndParse() {
     >
       <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
       <div class="el-upload__text">拖拽 txt / md 文件到此，或点击选择文件</div>
-      <template #tip>
-        <div class="el-upload__tip">
-          前端将读取文本并按 300-500 字切片，自动写入 knowledge_chunks
-        </div>
-      </template>
     </el-upload>
 
     <div class="upload-actions">
@@ -279,6 +274,15 @@ async function handleUploadAndParse() {
 </template>
 
 <style scoped>
+.upload-box :deep(.el-upload-dragger) {
+  padding: 24px 16px;
+}
+
+.upload-box :deep(.el-icon--upload) {
+  font-size: 48px;
+  margin-bottom: 8px;
+}
+
 .upload-actions {
   margin-top: 12px;
   display: flex;

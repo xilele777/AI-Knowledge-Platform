@@ -52,6 +52,10 @@ export const useUserStore = defineStore('user', {
     isLoggedIn: (state) => Boolean(state.session),
     isAdmin: (state) => state.role === 'admin',
     email: (state) => state.user?.email || '',
+    displayName: (state) => {
+      const meta = state.user?.user_metadata
+      return meta?.full_name || meta?.name || meta?.nickname || state.user?.email || '用户'
+    },
   },
 
   actions: {

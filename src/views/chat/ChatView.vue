@@ -91,7 +91,19 @@ function formatDate(text: string): string {
 async function bootstrap() {
   try {
     errorText.value = ''
-    await Promise.all([loadKnowledgeBases(), loadChats(), aiConfigStore.loadConfig()])
+    await Promise.all([
+      loadKnowledgeBases({
+        preferCache: true,
+        silent: Boolean(session.listCacheStore.isFresh(session.listCacheStore.knowledgeBases)),
+      }),
+      aiConfigStore.loadConfig(),
+    ])
+
+    if (!session.listCacheStore.isFresh(session.listCacheStore.chats)) {
+      await loadChats({ preferCache: true })
+    } else {
+      await loadChats({ preferCache: true, silent: true })
+    }
 
     const queryKb = typeof route.query.knowledgeBaseId === 'string' ? route.query.knowledgeBaseId : ''
     if (queryKb) {
@@ -182,6 +194,7 @@ useKeyboardShortcut({
             :class="{ active: chat.id === activeChatId }"
             @click="switchChatAndLoad(chat)"
           >
+            <div class="chat-item-indicator" />
             <div class="chat-item-content">
               <div class="chat-title">{{ chat.title }}</div>
               <div class="chat-date">{{ formatDate(chat.updatedAt) }}</div>
@@ -349,7 +362,7 @@ useKeyboardShortcut({
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
 }
 
 .empty-chats {
@@ -361,20 +374,39 @@ useKeyboardShortcut({
 
 .chat-item {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 8px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 12px;
+  border-radius: 16px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
+  background: var(--md-sys-color-surface-container-lowest);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .chat-item:hover {
   background: var(--md-sys-color-surface-container);
+  border-color: var(--md-sys-color-outline);
+  transform: translateY(-1px);
 }
 
 .chat-item.active {
-  background: var(--md-sys-color-primary-container);
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 82%, white 18%);
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, var(--md-sys-color-outline-variant) 60%);
+  box-shadow: 0 10px 20px rgba(26, 115, 232, 0.12);
+}
+
+.chat-item-indicator {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.chat-item.active .chat-item-indicator {
+  background: var(--md-sys-color-primary);
 }
 
 .chat-item-content {
@@ -384,10 +416,10 @@ useKeyboardShortcut({
 
 .chat-title {
   font-size: var(--md-sys-typescale-body-medium);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--md-sys-color-on-surface);
   line-height: 1.4;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -395,7 +427,6 @@ useKeyboardShortcut({
 
 .chat-item.active .chat-title {
   color: var(--md-sys-color-primary);
-  font-weight: 600;
 }
 
 .chat-date {

@@ -12,41 +12,30 @@ import {
   ChatLineSquare,
   DataAnalysis,
   ArrowLeftBold,
-  Sunny,
-  Moon,
 } from '@element-plus/icons-vue'
 import type { MenuGroup } from '../router/menus'
 import { useUserStore } from '../stores/user'
-import { useDarkMode } from '../composables/useDarkMode'
-
-const darkMode = useDarkMode()
 
 interface DropdownAction {
-  /** 唯一标识 */
   key: string
-  /** 显示文案 */
   label: string
-  /** 是否显示分割线 */
   divided?: boolean
-  /** 是否渲染为危险操作（红色） */
   danger?: boolean
 }
 
 interface Props {
-  /** 菜单分组数据 */
   menuGroups: MenuGroup[]
-  /** 左上角标题 */
   appTitle?: string
-  /** 下拉菜单额外操作（在"退出登录"之前插入） */
   extraActions?: DropdownAction[]
+  homePath?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   appTitle: 'AI 知识库平台',
   extraActions: () => [],
+  homePath: '/dashboard',
 })
 
-/** 合并所有布局可能用到的图标映射 */
 const iconMap: Record<string, Component> = {
   Document,
   Share,
@@ -69,11 +58,28 @@ const activeMenu = computed(() => {
   if (path.startsWith('/docs/')) return '/docs'
   if (path.startsWith('/knowledge/')) return '/knowledge'
   if (path.startsWith('/shared/')) return '/shared'
-  if (path.startsWith('/admin/')) return path
+  if (path === '/admin') return '/admin/dashboard'
+  if (path.startsWith('/admin/')) {
+    if (path.startsWith('/admin/users/')) return '/admin/users'
+    if (path.startsWith('/admin/docs/')) return '/admin/docs'
+    if (path.startsWith('/admin/files/')) return '/admin/files'
+    if (path.startsWith('/admin/chats/')) return '/admin/chats'
+    if (path.startsWith('/admin/operation-logs/')) return '/admin/operation-logs'
+    return path
+  }
   return path
 })
 
 const isAdmin = computed(() => userStore.isAdmin)
+
+const visibleMenuGroups = computed(() => {
+  return props.menuGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.requiresAdmin || isAdmin.value),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 
 function handleMenuCommand(command: string) {
   const action = props.extraActions.find((a) => a.key === command)
@@ -87,30 +93,40 @@ function handleMenuCommand(command: string) {
     void userStore.logout().then(() => router.replace('/login'))
   }
 }
+
+function goHome() {
+  void router.push(props.homePath)
+}
 </script>
 
 <template>
   <el-container class="layout-shell">
-    <!-- ===== 左侧导航 ===== -->
     <el-aside width="240px" class="layout-aside">
-      <div class="aside-header">
+      <div
+        class="aside-header app-brand"
+        role="button"
+        tabindex="0"
+        @click="goHome"
+        @keydown.enter.prevent="goHome"
+        @keydown.space.prevent="goHome"
+      >
         <div class="app-logo">
           <svg width="40" height="40" viewBox="0 0 48 48" fill="none">
             <defs>
               <linearGradient id="nav-logo-grad" x1="0" y1="0" x2="48" y2="48">
-                <stop stop-color="#1a73e8"/>
-                <stop offset="1" stop-color="#7c4dff"/>
+                <stop stop-color="#1a73e8" />
+                <stop offset="1" stop-color="#7c4dff" />
               </linearGradient>
             </defs>
-            <rect width="48" height="48" rx="12" fill="url(#nav-logo-grad)"/>
-            <path d="M14 17h20v3H14v-3zm0 11h20v3H14v-3z" fill="white"/>
+            <rect width="48" height="48" rx="12" fill="url(#nav-logo-grad)" />
+            <path d="M14 17h20v3H14v-3zm0 11h20v3H14v-3z" fill="white" />
           </svg>
         </div>
         <div class="app-title gradient-text">{{ appTitle }}</div>
       </div>
 
       <nav class="menu">
-        <template v-for="group in menuGroups" :key="group.label">
+        <template v-for="group in visibleMenuGroups" :key="group.label">
           <div class="menu-group-label">{{ group.label }}</div>
           <div
             v-for="item in group.items"
@@ -128,31 +144,16 @@ function handleMenuCommand(command: string) {
       </nav>
     </el-aside>
 
-    <!-- ===== 右侧内容区 ===== -->
     <el-container class="layout-container">
       <el-header class="layout-header">
         <div class="header-left" />
         <div class="header-right">
-          <!-- 暗色模式切换 -->
-          <el-button
-            circle
-            size="small"
-            class="theme-toggle-btn"
-            :title="darkMode.isDark.value ? '切换浅色模式' : '切换暗色模式'"
-            @click="darkMode.toggle()"
-          >
-            <el-icon :size="16">
-              <Sunny v-if="darkMode.isDark.value" />
-              <Moon v-else />
-            </el-icon>
-          </el-button>
-
           <el-dropdown trigger="click" placement="bottom-end" @command="handleMenuCommand">
             <div class="user-avatar-trigger">
               <el-avatar :size="32" class="user-avatar">
-                {{ (userStore.user?.email || 'U')[0].toUpperCase() }}
+                {{ (userStore.displayName || 'U')[0].toUpperCase() }}
               </el-avatar>
-              <span class="user-name">{{ userStore.user?.email || '用户' }}</span>
+              <span class="user-name">{{ userStore.displayName }}</span>
               <el-icon class="dropdown-caret"><ArrowLeftBold /></el-icon>
             </div>
             <template #dropdown>
@@ -170,10 +171,7 @@ function handleMenuCommand(command: string) {
                   </el-dropdown-item>
                 </template>
 
-                <el-dropdown-item
-                  command="logout"
-                  :divided="extraActions.length > 0"
-                >
+                <el-dropdown-item command="logout" :divided="extraActions.length > 0">
                   <span class="logout-text">退出登录</span>
                 </el-dropdown-item>
               </el-dropdown-menu>
@@ -202,7 +200,21 @@ function handleMenuCommand(command: string) {
   background-color: var(--md-sys-color-background);
 }
 
-/* ---------- 侧边栏 ---------- */
+.app-brand {
+  cursor: pointer;
+  transition: transform var(--md-sys-transition-medium) ease;
+  border-radius: var(--md-sys-shape-corner-large);
+}
+
+.app-brand:hover {
+  transform: translateY(-1px);
+}
+
+.app-brand:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
 .layout-aside {
   width: 240px;
   flex-shrink: 0;
@@ -234,8 +246,6 @@ function handleMenuCommand(command: string) {
   letter-spacing: -0.3px;
 }
 
-
-/* ---------- 菜单 ---------- */
 .menu {
   flex: 1;
   overflow-y: auto;
@@ -306,7 +316,6 @@ function handleMenuCommand(command: string) {
   text-overflow: ellipsis;
 }
 
-/* ---------- 右侧容器 ---------- */
 .layout-container {
   flex: 1;
   display: flex;
@@ -316,7 +325,6 @@ function handleMenuCommand(command: string) {
   background-color: var(--md-sys-color-background);
 }
 
-/* ---------- 顶部栏 ---------- */
 .layout-header {
   display: flex;
   align-items: center;
@@ -328,27 +336,10 @@ function handleMenuCommand(command: string) {
   height: 64px;
 }
 
-/* ---------- 用户区 ---------- */
 .header-right {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.theme-toggle-btn {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: transparent;
-  color: var(--md-sys-color-on-surface-variant);
-  transition: all var(--md-sys-transition-medium) ease;
-}
-
-.theme-toggle-btn:hover {
-  background: var(--md-sys-color-surface-container);
-  border-color: var(--md-sys-color-outline);
-  color: var(--md-sys-color-on-surface);
 }
 
 .user-avatar-trigger {
@@ -408,7 +399,6 @@ function handleMenuCommand(command: string) {
   color: var(--md-sys-color-error);
 }
 
-/* ---------- 内容区 ---------- */
 .layout-main {
   padding: var(--md-sys-spacing-lg);
   overflow: auto;
@@ -417,7 +407,6 @@ function handleMenuCommand(command: string) {
   background-color: var(--md-sys-color-background);
 }
 
-/* fullBleed 页面（chat / 文档编辑器）：页面自管高度与滚动 */
 .layout-main--fill {
   padding: 0;
   overflow: hidden;
@@ -425,54 +414,17 @@ function handleMenuCommand(command: string) {
   flex-direction: column;
 }
 
-/* ---------- 页面过渡动画 ---------- */
 .page-fade-enter-active {
-  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
-              transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .page-fade-leave-active {
-  transition: opacity 150ms ease-in,
-              transform 150ms ease-in;
+  transition: opacity 150ms ease-in, transform 150ms ease-in;
 }
 
-.page-fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
+.page-fade-enter-from,
 .page-fade-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
-}
-
-/* ---------- 响应式 ---------- */
-@media (max-width: 768px) {
-  .layout-aside {
-    width: 0;
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-    z-index: 100;
-    transition: width 0.3s ease;
-    box-shadow: var(--md-sys-elevation-level-3);
-  }
-
-  .layout-aside.open {
-    width: 240px;
-  }
-
-  .layout-main {
-    padding: var(--md-sys-spacing-md);
-  }
-
-  .user-name {
-    display: none;
-  }
-
-  .user-avatar-trigger {
-    padding: 4px;
-  }
+  transform: translateY(4px);
 }
 </style>

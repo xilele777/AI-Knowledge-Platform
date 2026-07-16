@@ -34,11 +34,6 @@ function handleRemove(knowledgeBaseId: string, documentId: string) {
 
     <el-table v-else :data="props.items" border stripe>
       <el-table-column prop="title" label="文档标题" min-width="220" />
-      <el-table-column label="文档状态" width="120">
-        <template #default="scope">
-          {{ scope.row.documentStatus || '-' }}
-        </template>
-      </el-table-column>
       <el-table-column label="切片数" width="100">
         <template #default="scope">
           {{ scope.row.chunkCount }}

@@ -1,5 +1,4 @@
 import { createApp } from 'vue'
-import 'element-plus/theme-chalk/dark/css-vars.css'
 import 'element-plus/theme-chalk/el-message.css'
 import 'element-plus/theme-chalk/el-message-box.css'
 import './styles/theme.css'
@@ -14,7 +13,6 @@ import { initErrorMonitor } from './utils/errorMonitor'
 
 // 不再 import 'element-plus/dist/index.css'（全量 ~351KB CSS）。
 // 组件级 CSS 由 unplugin-vue-components 的 ElementPlusResolver 按需注入。
-// 这里保留 dark css-vars：暗黑主题变量需全局可用，体积极小。
 
 async function bootstrap() {
   const app = createApp(App)

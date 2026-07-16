@@ -3,6 +3,8 @@ import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts'
 
 type AnalyticsRequestBody = {
   days?: number
+  startDate?: string
+  endDate?: string
 }
 
 Deno.serve(async (request) => {
@@ -28,7 +30,27 @@ Deno.serve(async (request) => {
     }
 
     const body = (await request.json().catch(() => ({}))) as AnalyticsRequestBody
-    const normalizedDays = Math.max(1, Math.min(30, Math.floor(body.days || 7)))
+    const hasCustomRange = Boolean(body.startDate && body.endDate)
+    const normalizedDays = Math.max(1, Math.min(60, Math.floor(body.days || 7)))
+
+    if (hasCustomRange) {
+      const start = new Date(`${body.startDate}T00:00:00Z`)
+      const end = new Date(`${body.endDate}T00:00:00Z`)
+
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return errorResponse('Invalid custom date range', 400)
+      }
+
+      if (end < start) {
+        return errorResponse('endDate must be greater than or equal to startDate', 400)
+      }
+
+      const diffDays = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
+      if (diffDays > 60) {
+        return errorResponse('Custom date range cannot exceed 60 days', 400)
+      }
+    }
+
     const client = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -38,7 +60,9 @@ Deno.serve(async (request) => {
     })
 
     const { data, error } = await client.rpc('admin_get_analytics_overview', {
-      p_days: normalizedDays,
+      p_days: hasCustomRange ? null : normalizedDays,
+      p_start_date: hasCustomRange ? body.startDate ?? null : null,
+      p_end_date: hasCustomRange ? body.endDate ?? null : null,
     })
 
     if (error) {

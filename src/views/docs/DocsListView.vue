@@ -8,7 +8,9 @@ import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import EmptyStateActionable from '@/components/shared/EmptyStateActionable.vue'
 import PageContainer from '@/components/shared/PageContainer.vue'
 import SearchInput from '@/components/shared/SearchInput.vue'
-import CapsuleTabs from '@/components/shared/CapsuleTabs.vue'
+import { useAsyncState } from '@/composables/useAsyncState'
+import { useListCacheStore } from '@/stores/listCache'
+import { apiDedupe } from '@/utils/apiDedupe'
 import {
   createDocument,
   deleteDocument,
@@ -25,21 +27,10 @@ interface CreateForm {
 
 const router = useRouter()
 const route = useRoute()
-const loading = ref(false)
+const docsState = useAsyncState<DocumentListItem[]>({ initialData: [] })
+const listCacheStore = useListCacheStore()
 const submitting = ref(false)
-const statusFilter = ref<string>('all')
-
-const statusTabs = [
-  { label: '全部', value: 'all' },
-  { label: '已发布', value: 'published' },
-  { label: '草稿', value: 'draft' },
-]
-
-const filteredDocs = computed(() => {
-  if (statusFilter.value === 'all') return docs.value
-  return docs.value.filter((d) => d.status === statusFilter.value)
-})
-const docs = ref<DocumentListItem[]>([])
+const docs = computed(() => docsState.data.value ?? [])
 const searchKeyword = ref('')
 const errorMessage = ref('')
 const createDialogVisible = ref(false)
@@ -56,29 +47,41 @@ const createRules: FormRules<CreateForm> = {
   ],
 }
 
-const loadDocuments = async () => {
-  loading.value = true
+const loadDocuments = async (opts?: { silent?: boolean; preferCache?: boolean }) => {
   errorMessage.value = ''
 
-  try {
+  if (opts?.preferCache && !searchKeyword.value.trim() && listCacheStore.documents) {
+    docsState.data.value = listCacheStore.getData(listCacheStore.documents) ?? []
+  }
+
+  const runner = async () => {
     const keyword = searchKeyword.value.trim()
     const result = keyword
-      ? await searchDocumentsByTitle(keyword)
-      : await getMyDocuments()
+      ? await apiDedupe.dedupe(`documents:search:${keyword}`, () => searchDocumentsByTitle(keyword))
+      : await apiDedupe.dedupe('documents:list', () => getMyDocuments())
 
     if (!result.success) {
       errorMessage.value = result.error || '获取文档列表失败'
-      docs.value = []
-      return
+      throw new Error(errorMessage.value)
     }
 
-    docs.value = result.data || []
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '获取文档列表失败'
-    docs.value = []
-  } finally {
-    loading.value = false
+    const next = result.data || []
+    if (!keyword) {
+      listCacheStore.setDocuments(next)
+    }
+    return next
   }
+
+  if (opts?.silent && docsState.data.value?.length) {
+    try {
+      docsState.data.value = await runner()
+    } catch {
+      // 静默刷新失败时保留旧数据，仅展示错误提示
+    }
+    return
+  }
+
+  await docsState.execute(runner)
 }
 
 const handleSearch = () => {
@@ -115,10 +118,10 @@ const handleCreate = async () => {
     }
 
     ElMessage.success('文档创建成功')
+    listCacheStore.invalidate('documents')
     void track(ANALYTICS_EVENTS.DOCUMENT_CREATE, {
       document_id: result.data.id,
       title: result.data.title,
-      status: result.data.status,
     })
     createDialogVisible.value = false
     router.push(`/docs/${result.data.id}`)
@@ -150,6 +153,7 @@ const handleDeleteDoc = async (id: string) => {
     }
 
     ElMessage.success('删除成功')
+    listCacheStore.removeDocument(id)
     void track(ANALYTICS_EVENTS.DOCUMENT_DELETE, {
       document_id: id,
       from: 'docs_list',
@@ -165,12 +169,20 @@ const handleDeleteDoc = async (id: string) => {
   }
 }
 
+const isLoading = computed(() => docsState.isLoading.value)
+const showSkeleton = computed(() => docsState.showSkeleton.value)
+
+listCacheStore.registerRevalidator('documents', () => loadDocuments({ silent: true }))
+
 if (route.query.create === '1') {
   openCreateDialog()
   void router.replace({ path: route.path, query: { ...route.query, create: undefined } })
 }
 
-void loadDocuments()
+void loadDocuments({
+  preferCache: true,
+  silent: Boolean(listCacheStore.isFresh(listCacheStore.documents)),
+})
 </script>
 
 <template>
@@ -189,10 +201,6 @@ void loadDocuments()
       <el-button type="primary" @click="openCreateDialog">新建文档</el-button>
     </template>
 
-    <div class="filter-row">
-      <CapsuleTabs v-model="statusFilter" :tabs="statusTabs" color="var(--module-docs)" />
-    </div>
-
     <el-alert
       v-if="errorMessage"
       :title="errorMessage"
@@ -203,10 +211,10 @@ void loadDocuments()
     />
 
     <div class="docs-content">
-      <SkeletonCard v-if="loading" :count="6" variant="card" />
+      <SkeletonCard v-if="showSkeleton" :count="6" variant="card" />
 
       <EmptyStateActionable
-        v-else-if="!loading && filteredDocs.length === 0"
+        v-else-if="!isLoading && docs.length === 0"
         icon="empty-doc"
         title="还没有文档"
         description="创建你的第一篇文档，AI 助手会帮你润色和总结"
@@ -216,7 +224,7 @@ void loadDocuments()
 
       <div v-else class="card-grid">
         <DocumentCard
-          v-for="item in filteredDocs"
+          v-for="item in docs"
           :key="item.id"
           :item="item"
           @open="handleOpenDoc"
@@ -247,14 +255,6 @@ void loadDocuments()
 </template>
 
 <style scoped>
-.filter-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
 .error-alert {
   margin-bottom: 16px;
 }

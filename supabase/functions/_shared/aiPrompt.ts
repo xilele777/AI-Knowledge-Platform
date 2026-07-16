@@ -43,7 +43,7 @@ type AiChatRequestPayload = {
   knowledge?: AiChatKnowledgePayload
 }
 
-type ChatRequestBody = {
+export type ChatRequestBody = {
   request?: AiChatRequestPayload
   params?: AiGenerateTextParams
   stream?: boolean

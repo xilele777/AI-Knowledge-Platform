@@ -158,7 +158,6 @@ export interface KnowledgeDocumentSource {
   knowledgeBaseId: string
   documentId: string
   title: string
-  documentStatus: string | null
   chunkCount: number
   lastSyncedAt: string | null
   createdAt: string
