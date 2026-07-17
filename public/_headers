@@ -1,0 +1,7 @@
+# 静态资源长缓存：带内容 hash 的文件变更时 hash 自动变化，旧文件永远不会被覆盖
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 入口页不缓存：必须每次拿最新版，否则会引用已删除的旧 chunk 文件导致白屏
+/index.html
+  Cache-Control: no-cache
