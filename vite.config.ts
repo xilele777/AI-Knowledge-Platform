@@ -5,19 +5,17 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    vue(),
-    // Element Plus 按需引入：模板里直接用 <el-button> 等组件，
-    // 自动 import 对应组件 JS + 组件级 CSS，而不是全量打包 dist/index.css。
-    AutoImport({
-      resolvers: [ElementPlusResolver()],
-    }),
-    Components({
-      resolvers: [ElementPlusResolver()],
-    }),
-  ],
+  plugins: [vue(), // Element Plus 按需引入：模板里直接用 <el-button> 等组件，
+  // 自动 import 对应组件 JS + 组件级 CSS，而不是全量打包 dist/index.css。
+  AutoImport({
+    resolvers: [ElementPlusResolver()],
+  }), Components({
+    resolvers: [ElementPlusResolver()],
+  }), cloudflare()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
